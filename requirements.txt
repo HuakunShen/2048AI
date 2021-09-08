@@ -7,7 +7,7 @@ mccabe==0.6.1
 numpy==1.19.5
 packaging==20.8
 pandas
-Pillow==8.1.1
+Pillow==8.3.2
 pluggy==0.13.1
 py==1.10.0
 pycodestyle==2.6.0
