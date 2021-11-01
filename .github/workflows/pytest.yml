@@ -8,6 +8,7 @@ on:
       - ".github/workflows/**"
       - "src/**"
       - "tests/**"
+      - "requirements.txt"
   pull_request:
     branches: [master]
 jobs:
