@@ -5,7 +5,7 @@ flake8==3.8.4
 iniconfig==1.1.1
 llvmlite==0.35.0
 mccabe==0.6.1
-numpy==1.19.5
+numpy==1.22.0
 packaging==20.8
 pandas
 Pillow==8.3.2
