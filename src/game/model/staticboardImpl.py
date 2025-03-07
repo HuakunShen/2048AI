@@ -45,18 +45,30 @@ class NumpyStaticBoard(StaticBoard):
     @staticmethod
     def get_random_empty_cell_coordinate(matrix: np.ndarray) -> Union[np.array, None]:
         empty_cell_coordinates = np.argwhere(matrix == 0)
-        return None if len(empty_cell_coordinates) == 0 else empty_cell_coordinates[
-            np.random.randint(0, len(empty_cell_coordinates))]
+        return (
+            None
+            if len(empty_cell_coordinates) == 0
+            else empty_cell_coordinates[
+                np.random.randint(0, len(empty_cell_coordinates))
+            ]
+        )
 
     @staticmethod
     def get_empty_matrix(width: int = 4, height: int = 4) -> np.ndarray:
-        return np.zeros((width, height)).astype('int64')
+        return np.zeros((width, height)).astype("int64")
 
     @staticmethod
-    def set_random_cell(matrix: np.ndarray, inplace: bool = True) -> Tuple[np.ndarray, bool]:
+    def set_random_cell(
+        matrix: np.ndarray, inplace: bool = True
+    ) -> Tuple[np.ndarray, bool]:
         empty_cell_coordinates = np.argwhere(matrix == 0)
-        empty_cell = None if len(empty_cell_coordinates) == 0 else empty_cell_coordinates[
-            np.random.randint(0, len(empty_cell_coordinates))]
+        empty_cell = (
+            None
+            if len(empty_cell_coordinates) == 0
+            else empty_cell_coordinates[
+                np.random.randint(0, len(empty_cell_coordinates))
+            ]
+        )
         if not inplace:
             matrix = matrix.copy()
         if empty_cell is None:
@@ -70,8 +82,9 @@ class NumpyStaticBoard(StaticBoard):
     def get_init_matrix(width: int = 4, height: int = 4) -> np.ndarray:
         mesh_grid = np.meshgrid(np.arange(width), np.arange(height))
         coordinates = np.stack(mesh_grid, axis=2).reshape(width * height, 2)
-        rand_coordinates = coordinates[np.random.choice(
-            len(coordinates), 2, replace=False)]
+        rand_coordinates = coordinates[
+            np.random.choice(len(coordinates), 2, replace=False)
+        ]
         matrix = np.zeros((width, height))
         for i in range(2):
             matrix[rand_coordinates[i][0], rand_coordinates[i][1]] = 2
@@ -86,7 +99,8 @@ class NumpyStaticBoard(StaticBoard):
                 if matrix[row_i, col_i] == 0:
                     return False
                 neighbor_coordinates = NumpyStaticBoard.get_neighbors_coordinates(
-                    matrix, row_i, col_i)
+                    matrix, row_i, col_i
+                )
                 for neighbor in neighbor_coordinates:
                     if matrix[neighbor[0], neighbor[1]] == matrix[row_i, col_i]:
                         return False
@@ -99,15 +113,27 @@ class NumpyStaticBoard(StaticBoard):
         changed = False
         score = 0
         has_merged_arr = np.zeros_like(arr)
-        for i in range(1 if reverse else arr_len - 2, arr_len if reverse else -1, 1 if reverse else -1):
+        for i in range(
+            1 if reverse else arr_len - 2,
+            arr_len if reverse else -1,
+            1 if reverse else -1,
+        ):
             curr_i = i
-            for next_i in range(i + (-1 if reverse else 1), -1 if reverse else arr_len, -1 if reverse else 1):
+            for next_i in range(
+                i + (-1 if reverse else 1),
+                -1 if reverse else arr_len,
+                -1 if reverse else 1,
+            ):
                 if arr[next_i] == 0 and arr[curr_i] != 0:
                     arr[next_i] = arr[curr_i]
                     arr[curr_i] = 0
                     curr_i = next_i
                     changed = True
-                elif arr[curr_i] == arr[next_i] and not has_merged_arr[next_i] and arr[curr_i] != 0:
+                elif (
+                    arr[curr_i] == arr[next_i]
+                    and not has_merged_arr[next_i]
+                    and arr[curr_i] != 0
+                ):
                     # merge case
                     arr[next_i] *= 2
                     arr[curr_i] = 0
@@ -120,8 +146,11 @@ class NumpyStaticBoard(StaticBoard):
         return arr, score, changed
 
     @staticmethod
-    def move(matrix: np.ndarray, direction: Union[UP, DOWN, LEFT, RIGHT], inplace: bool = True) -> Tuple[np.ndarray,
-                                                                                                         int, bool]:
+    def move(
+        matrix: np.ndarray,
+        direction: Union[UP, DOWN, LEFT, RIGHT],
+        inplace: bool = True,
+    ) -> Tuple[np.ndarray, int, bool]:
         score = 0
         changed = False
         if not inplace:
@@ -129,16 +158,20 @@ class NumpyStaticBoard(StaticBoard):
         for i in range(len(matrix)):
             if direction == UP:
                 arr, score_, changed_ = NumpyStaticBoard.collapse_array(
-                    matrix[:, i], reverse=True)
+                    matrix[:, i], reverse=True
+                )
             elif direction == DOWN:
                 arr, score_, changed_ = NumpyStaticBoard.collapse_array(
-                    matrix[:, i], reverse=False)
+                    matrix[:, i], reverse=False
+                )
             elif direction == LEFT:
                 arr, score_, changed_ = NumpyStaticBoard.collapse_array(
-                    matrix[i, :], reverse=True)
+                    matrix[i, :], reverse=True
+                )
             elif direction == RIGHT:
                 arr, score_, changed_ = NumpyStaticBoard.collapse_array(
-                    matrix[i, :], reverse=False)
+                    matrix[i, :], reverse=False
+                )
             else:
                 raise ValueError(f"Invalid direction: {direction}")
             changed = max(changed, changed_)
@@ -172,8 +205,13 @@ class TorchStaticBoard(object):
     @staticmethod
     def get_random_empty_cell_coordinate(matrix: Tensor) -> Union[Tensor, None]:
         empty_cell_coordinates = TorchStaticBoard.get_empty_coordinates(matrix)
-        return None if len(empty_cell_coordinates) == 0 else empty_cell_coordinates[
-            np.random.randint(0, len(empty_cell_coordinates))]
+        return (
+            None
+            if len(empty_cell_coordinates) == 0
+            else empty_cell_coordinates[
+                np.random.randint(0, len(empty_cell_coordinates))
+            ]
+        )
 
     @staticmethod
     def get_empty_matrix(width: int = 4, height: int = 4):
@@ -219,7 +257,8 @@ class TorchStaticBoard(object):
             row = matrix[row_i, :]
             for col_i in range(len(row)):
                 neighbor_coordinates = TorchStaticBoard.get_neighbors_coordinates(
-                    matrix, row_i, col_i)
+                    matrix, row_i, col_i
+                )
                 for neighbor in neighbor_coordinates:
                     if matrix[neighbor[0], neighbor[1]] == matrix[row_i, col_i]:
                         return False
@@ -228,7 +267,9 @@ class TorchStaticBoard(object):
         return True
 
     @staticmethod
-    def move(matrix: Tensor, direction: Union[UP, DOWN, LEFT, RIGHT], inplace: bool = True) -> Tuple[Tensor, bool]:
+    def move(
+        matrix: Tensor, direction: Union[UP, DOWN, LEFT, RIGHT], inplace: bool = True
+    ) -> Tuple[Tensor, bool]:
         score = 0
         changed = False
         if not inplace:
@@ -236,16 +277,20 @@ class TorchStaticBoard(object):
         for i in range(len(matrix)):
             if direction == UP:
                 arr, score_, changed_ = TorchStaticBoard.collapse_array(
-                    matrix[:, i], reverse=True)
+                    matrix[:, i], reverse=True
+                )
             elif direction == DOWN:
                 arr, score_, changed_ = TorchStaticBoard.collapse_array(
-                    matrix[:, i], reverse=False)
+                    matrix[:, i], reverse=False
+                )
             elif direction == LEFT:
                 arr, score_, changed_ = TorchStaticBoard.collapse_array(
-                    matrix[i, :], reverse=True)
+                    matrix[i, :], reverse=True
+                )
             elif direction == RIGHT:
                 arr, score_, changed_ = TorchStaticBoard.collapse_array(
-                    matrix[i, :], reverse=False)
+                    matrix[i, :], reverse=False
+                )
             else:
                 raise ValueError(f"Invalid direction: {direction}")
             changed = max(changed, changed_)
@@ -263,15 +308,27 @@ class TorchStaticBoard(object):
         changed = False
         score = 0
         has_merged_arr = torch.zeros_like(arr)
-        for i in range(1 if reverse else arr_len - 2, arr_len if reverse else -1, 1 if reverse else -1):
+        for i in range(
+            1 if reverse else arr_len - 2,
+            arr_len if reverse else -1,
+            1 if reverse else -1,
+        ):
             curr_i = i
-            for next_i in range(i + (-1 if reverse else 1), -1 if reverse else arr_len, -1 if reverse else 1):
+            for next_i in range(
+                i + (-1 if reverse else 1),
+                -1 if reverse else arr_len,
+                -1 if reverse else 1,
+            ):
                 if arr[next_i] == 0 and arr[curr_i] != 0:
                     arr[next_i] = arr[curr_i]
                     arr[curr_i] = 0
                     curr_i = next_i
                     changed = True
-                elif arr[curr_i] == arr[next_i] and not has_merged_arr[next_i] and arr[curr_i] != 0:
+                elif (
+                    arr[curr_i] == arr[next_i]
+                    and not has_merged_arr[next_i]
+                    and arr[curr_i] != 0
+                ):
                     # merge case
                     arr[next_i] *= 2
                     arr[curr_i] = 0
