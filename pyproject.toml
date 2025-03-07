@@ -9,5 +9,6 @@ dependencies = [
     "numba>=0.61.0",
     "pandas>=2.2.3",
     "pygame>=2.6.1",
+    "tensorboard>=2.19.0",
     "torch>=2.6.0",
 ]

@@ -10,6 +10,8 @@ from collections import deque
 from src.agent.model.dqn import DQN
 from typing import Dict, List, Tuple
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
+import time
 
 
 class BacktrackingAIPlayer(Player):
@@ -175,13 +177,39 @@ class DQNPlayer(Player):
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
+        self.episode_rewards = []
         
         # Optimizer
         self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)
         
+        # TensorBoard writer
+        self.writer = SummaryWriter(f'runs/dqn_2048_{int(time.time())}')
+        
     def get_state(self) -> torch.Tensor:
         """Convert game matrix to tensor state"""
         return torch.tensor(self._game.get_matrix(), dtype=torch.float32, device=self.device).unsqueeze(0)
+    
+    def calculate_reward(self, score: int, changed: bool, prev_max: int, current_max: int) -> float:
+        """Calculate reward based on multiple factors"""
+        reward = 0.0
+        
+        # Reward for score increase
+        reward += score * 0.1  # Scale down the raw score
+        
+        # Reward for increasing maximum tile
+        if current_max > prev_max:
+            reward += (current_max - prev_max) * 0.5
+        
+        # Penalty for invalid moves
+        if not changed:
+            reward -= 5.0
+            
+        # Extra reward for reaching milestone tiles
+        milestones = {64: 10, 128: 20, 256: 40, 512: 80, 1024: 160, 2048: 500}
+        if current_max in milestones and current_max > prev_max:
+            reward += milestones[current_max]
+            
+        return reward
     
     def get_move(self) -> Union[UP, DOWN, LEFT, RIGHT]:
         state = self.get_state()
@@ -192,6 +220,8 @@ class DQNPlayer(Player):
         
         with torch.no_grad():
             q_values = self.policy_net(state)
+            # Log Q-values distribution
+            self.writer.add_histogram('q_values', q_values, self.total_steps)
             return ARROW_KEYS[q_values.argmax().item()]
     
     def remember(self, state: torch.Tensor, action: int, reward: float, 
@@ -212,30 +242,33 @@ class DQNPlayer(Player):
         states, actions, rewards, next_states, dones = zip(*batch)
         
         # Convert to tensors with consistent dimensions
-        states = torch.cat(states).to(self.device)  # Shape: [batch_size, 4, 4]
-        actions = torch.tensor(actions, dtype=torch.long, device=self.device)  # Shape: [batch_size]
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)  # Shape: [batch_size]
-        next_states = torch.cat(next_states).to(self.device)  # Shape: [batch_size, 4, 4]
-        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)  # Shape: [batch_size]
+        states = torch.cat(states).to(self.device)
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        next_states = torch.cat(next_states).to(self.device)
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
         
-        # Get current Q values - Shape: [batch_size, 1]
+        # Get current Q values
         current_q_values = self.policy_net(states).gather(1, actions.unsqueeze(1))
         
         # Get next Q values from target net
         with torch.no_grad():
-            # Shape: [batch_size]
             next_q_values = self.target_net(next_states).max(1)[0]
-            # Shape: [batch_size]
             target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
         
         # Compute loss and update
         loss = F.smooth_l1_loss(current_q_values.squeeze(), target_q_values)
+        
+        # Log loss
+        self.writer.add_scalar('Loss/train', loss.item(), self.total_steps)
+        
         self.optimizer.zero_grad()
         loss.backward()
-        self.optimizer.step()
         
-        # Decay epsilon
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+        
+        self.optimizer.step()
     
     def update_target_network(self):
         """Update target network with policy network weights"""
@@ -243,25 +276,33 @@ class DQNPlayer(Player):
     
     def train(self, episodes: int = 1000, target_update: int = 10):
         """Train the DQN agent"""
+        self.total_steps = 0
+        best_score = 0
+        
         for episode in range(episodes):
             self._game.restart()
             state = self.get_state()
             total_reward = 0
+            episode_max = 0
+            moves_this_episode = 0
             
             while not self._game.get_is_done():
                 # Get action
                 action = self.get_move()
                 action_idx = ARROW_KEYS.index(action)
                 
+                # Store previous max value
+                prev_max = self._game.get_max_val()
+                
                 # Take action
                 matrix, score, changed = self._game.move(action)
                 next_state = self.get_state()
                 done = self._game.get_is_done()
                 
-                # Calculate reward (can be tuned)
-                reward = score + (1000 if self._game.has_won() else 0)
-                if not changed:
-                    reward = -10
+                # Calculate reward with new scheme
+                current_max = self._game.get_max_val()
+                reward = self.calculate_reward(score, changed, prev_max, current_max)
+                episode_max = max(episode_max, current_max)
                 
                 # Store experience
                 self.remember(state, action_idx, reward, next_state, done)
@@ -271,6 +312,14 @@ class DQNPlayer(Player):
                 
                 state = next_state
                 total_reward += reward
+                moves_this_episode += 1
+                self.total_steps += 1
+                
+                # Decay epsilon based on total steps
+                self.epsilon = max(self.epsilon_min, 
+                                 self.epsilon_min + 
+                                 (self.epsilon - self.epsilon_min) * 
+                                 np.exp(-self.total_steps / 10000))
                 
                 if self._game.has_won():
                     break
@@ -279,16 +328,36 @@ class DQNPlayer(Player):
             if episode % target_update == 0:
                 self.update_target_network()
             
+            # Log episode statistics
+            current_score = self._game.get_score()
+            best_score = max(best_score, current_score)
+            
+            self.writer.add_scalar('Score/episode', current_score, episode)
+            self.writer.add_scalar('MaxTile/episode', episode_max, episode)
+            self.writer.add_scalar('Reward/episode', total_reward, episode)
+            self.writer.add_scalar('Epsilon/episode', self.epsilon, episode)
+            self.writer.add_scalar('Moves/episode', moves_this_episode, episode)
+            self.writer.add_scalar('BestScore', best_score, episode)
+            
             if not self._quiet:
-                print(f"Episode {episode}, Score: {self._game.get_score()}, "
-                      f"Max Value: {self._game.get_max_val()}, "
-                      f"Total Reward: {total_reward}")
+                print(f"Episode {episode}, Score: {current_score}, "
+                      f"Max Value: {episode_max}, Moves: {moves_this_episode}, "
+                      f"Epsilon: {self.epsilon:.3f}")
     
     def save_model(self, path: str):
         """Save the policy network"""
-        torch.save(self.policy_net.state_dict(), path)
+        torch.save({
+            'policy_net_state_dict': self.policy_net.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epsilon': self.epsilon,
+            'total_steps': self.total_steps
+        }, path)
     
     def load_model(self, path: str):
         """Load a saved policy network"""
-        self.policy_net.load_state_dict(torch.load(path))
+        checkpoint = torch.load(path)
+        self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.epsilon = checkpoint['epsilon']
+        self.total_steps = checkpoint.get('total_steps', 0)
