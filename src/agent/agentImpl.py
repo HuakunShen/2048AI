@@ -4,6 +4,12 @@ from src.agent.agent import Player
 from src.game.controller.game import Game
 from src.game.utils import ARROW_KEYS, UP, DOWN, LEFT, RIGHT
 from src.game.model.staticboardImpl import NumpyStaticBoard, TorchStaticBoard
+import torch
+import random
+from collections import deque
+from src.agent.model.dqn import DQN
+from typing import Dict, List, Tuple
+import torch.nn.functional as F
 
 
 class BacktrackingAIPlayer(Player):
@@ -142,3 +148,147 @@ class RandomGuessAIPlayer(Player):
                     max_cumulative_score, score_cumulative)
             scores[first_move_i] += max_cumulative_score
         return ARROW_KEYS[np.argmax(scores)]
+
+
+class DQNPlayer(Player):
+    """
+    Deep Q-Learning Agent for 2048
+    Uses experience replay and target network for stable learning
+    """
+    def __init__(self, game: Game, quiet: bool = False, ui: bool = True,
+                 memory_size: int = 10000, batch_size: int = 64,
+                 gamma: float = 0.99, epsilon: float = 1.0,
+                 epsilon_min: float = 0.01, epsilon_decay: float = 0.995,
+                 learning_rate: float = 0.001, device: torch.device = None):
+        super().__init__(game, quiet, ui)
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # DQN networks
+        self.policy_net = DQN().to(self.device)
+        self.target_net = DQN().to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        
+        # Training parameters
+        self.memory = deque(maxlen=memory_size)
+        self.batch_size = batch_size
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        
+        # Optimizer
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        
+    def get_state(self) -> torch.Tensor:
+        """Convert game matrix to tensor state"""
+        return torch.tensor(self._game.get_matrix(), dtype=torch.float32, device=self.device).unsqueeze(0)
+    
+    def get_move(self) -> Union[UP, DOWN, LEFT, RIGHT]:
+        state = self.get_state()
+        
+        # Epsilon-greedy action selection
+        if random.random() < self.epsilon:
+            return ARROW_KEYS[np.random.randint(0, 4)]
+        
+        with torch.no_grad():
+            q_values = self.policy_net(state)
+            return ARROW_KEYS[q_values.argmax().item()]
+    
+    def remember(self, state: torch.Tensor, action: int, reward: float, 
+                next_state: torch.Tensor, done: bool):
+        """Store experience in replay memory"""
+        # Ensure tensors are detached from computation graph and on CPU for storage
+        state = state.detach().cpu()
+        next_state = next_state.detach().cpu()
+        self.memory.append((state, action, reward, next_state, done))
+    
+    def replay(self):
+        """Train on a batch of experiences"""
+        if len(self.memory) < self.batch_size:
+            return
+        
+        # Sample random batch from memory
+        batch = random.sample(self.memory, self.batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        
+        # Convert to tensors with consistent dimensions
+        states = torch.cat(states).to(self.device)  # Shape: [batch_size, 4, 4]
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device)  # Shape: [batch_size]
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)  # Shape: [batch_size]
+        next_states = torch.cat(next_states).to(self.device)  # Shape: [batch_size, 4, 4]
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)  # Shape: [batch_size]
+        
+        # Get current Q values - Shape: [batch_size, 1]
+        current_q_values = self.policy_net(states).gather(1, actions.unsqueeze(1))
+        
+        # Get next Q values from target net
+        with torch.no_grad():
+            # Shape: [batch_size]
+            next_q_values = self.target_net(next_states).max(1)[0]
+            # Shape: [batch_size]
+            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+        
+        # Compute loss and update
+        loss = F.smooth_l1_loss(current_q_values.squeeze(), target_q_values)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        # Decay epsilon
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+    
+    def update_target_network(self):
+        """Update target network with policy network weights"""
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+    
+    def train(self, episodes: int = 1000, target_update: int = 10):
+        """Train the DQN agent"""
+        for episode in range(episodes):
+            self._game.restart()
+            state = self.get_state()
+            total_reward = 0
+            
+            while not self._game.get_is_done():
+                # Get action
+                action = self.get_move()
+                action_idx = ARROW_KEYS.index(action)
+                
+                # Take action
+                matrix, score, changed = self._game.move(action)
+                next_state = self.get_state()
+                done = self._game.get_is_done()
+                
+                # Calculate reward (can be tuned)
+                reward = score + (1000 if self._game.has_won() else 0)
+                if not changed:
+                    reward = -10
+                
+                # Store experience
+                self.remember(state, action_idx, reward, next_state, done)
+                
+                # Train on past experiences
+                self.replay()
+                
+                state = next_state
+                total_reward += reward
+                
+                if self._game.has_won():
+                    break
+            
+            # Update target network periodically
+            if episode % target_update == 0:
+                self.update_target_network()
+            
+            if not self._quiet:
+                print(f"Episode {episode}, Score: {self._game.get_score()}, "
+                      f"Max Value: {self._game.get_max_val()}, "
+                      f"Total Reward: {total_reward}")
+    
+    def save_model(self, path: str):
+        """Save the policy network"""
+        torch.save(self.policy_net.state_dict(), path)
+    
+    def load_model(self, path: str):
+        """Load a saved policy network"""
+        self.policy_net.load_state_dict(torch.load(path))
+        self.target_net.load_state_dict(self.policy_net.state_dict())
