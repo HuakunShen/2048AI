@@ -1,19 +1,90 @@
-# 2048Pygame
+# 2048 AI
 
 <img src="README.assets/2048AI.gif" alt="2048AI.gif" width="50%;" />
 
-## AI Players
+A [2048](https://en.wikipedia.org/wiki/2048_(video_game)) game (pygame UI) plus a set of AI players that try to reach the 2048 tile — **classical search agents** and **reinforcement-learning agents**. Python 3.12, managed with [`uv`](https://docs.astral.sh/uv/).
+
+## Quick start
+
+```bash
+uv sync                                       # install deps into .venv
+uv run play.py                                # play manually (arrow keys; 'q' quit, 'r' restart)
+
+# Reinforcement learning
+uv run train_ntuple.py                        # train the STRONGEST agent (n-tuple TD; minutes on CPU)
+uv run train_dqn.py --smoke                   # sanity-check the DQN pipeline (MPS/CUDA/CPU auto)
+uv run evaluate_model.py models/<run>/best_model.pth   # greedy eval vs untrained baseline
+tensorboard --logdir runs                     # view training curves
+
+# Classical search agents (benchmark over many seeds)
+uv run test-ai.py backtracking --search_depth 3 --seeds 1-100 --mp
+uv run test-ai.py random --searches_per_move 20 --search_length 10 --seeds 1-100
+```
+
+> The classical benchmark (`test-ai.py`) and the tests need `pytest tqdm tabulate coverage`, which
+> are **not** declared in `pyproject.toml` — add them with `uv add --dev pytest tqdm tabulate coverage`.
+
+## Results summary
+
+| Agent | Method | Reach 2048 | Best tile | Speed |
+| --- | --- | --- | --- | --- |
+| **n-tuple TD** ⭐ | RL — afterstate TD, n-tuple value function | **80.6%** | **8192** | instant |
+| `BacktrackingAIPlayer` (depth 5) | search — depth-limited tree search | 32% | 2048 | ~19 s/move |
+| `RandomGuessAIPlayer` | search — Monte-Carlo random rollouts | 4% | 2048 | ~2 s/move |
+| DQN | RL — value-based (Double/Dueling) | 0% | 512 | instant |
+
+The **n-tuple TD** agent is the clear winner: after 40k games (~96 min on CPU) it reaches 2048 in
+80.6% of games (97.2% to 1024, ~36% to 4096, occasionally 8192) — and plays instantly.
+
+## Reinforcement-learning agents
+
+📖 **Full tutorial + experiment log (Chinese, written for people new to neural nets):
+[`docs/dqn_report.md`](docs/dqn_report.md).** Roadmap for what's next: [`docs/next_steps.md`](docs/next_steps.md).
+
+### n-tuple network + afterstate TD — the strongest agent
+
+Learns a value function over **afterstates** (the deterministic board right after a move's merges,
+before the random tile spawns) and picks actions by `argmax_a [ reward(s,a) + V(afterstate(s,a)) ]`.
+`V` is a set of overlapping n-tuple lookup tables with 8-fold dihedral symmetry weight-sharing.
+Tabular / CPU (no GPU needed), and dramatically more sample-efficient than DQN on 2048.
+
+```bash
+uv run train_ntuple.py --games 40000     # ~96 min -> 80.6% reach-2048
+uv run train_ntuple.py --smoke           # 300-game sanity run (reaches 1024 in seconds)
+```
+
+Code: [`src/agent/ntuple.py`](src/agent/ntuple.py), [`train_ntuple.py`](train_ntuple.py).
+
+### DQN — investigated in depth (and it struggles here)
+
+A Double/Dueling DQN with 16-channel one-hot board encoding, action masking, experience replay,
+target network, reward shaping and reward clipping. Despite a fair, thorough effort (multiple
+architectures, ~1.5M steps), **vanilla value-based DQN does not learn to play 2048 well** — it
+plateaus near the random baseline and never reaches 2048. The report walks through the whole
+debugging journey, including diagnosing a **value-divergence bug** (Q exploded to ~1e5) and fixing
+it with reward clipping — after which it's stable but still limited by 2048's exploration /
+credit-assignment difficulty (which afterstate methods sidestep).
+
+```bash
+uv run train_dqn.py --episodes 5000 --reward-clip 1.0 --empty-weight 0.5
+uv run train_dqn.py --resume models/<run>/checkpoint_ep500.pth   # resume training
+```
+
+Code: [`src/agent/model/dqn.py`](src/agent/model/dqn.py), `DQNPlayer` in
+[`src/agent/agentImpl.py`](src/agent/agentImpl.py), [`train_dqn.py`](train_dqn.py).
+
+## Classical search agents
 
 ### RandomGuessAIPlayer
 
-`RandomGuessAIPlayer` has accuracy of 4%.
+`RandomGuessAIPlayer` has accuracy of 4% — Monte-Carlo random rollouts per candidate move.
 
 ```
 Within 100 seeds, 4 passed
 Total Time Taken: 0:03:15.620000
 Average Time Taken: 1.96s
       score  max_val    runtime
-seed                           
+seed
 44    20300   2048.0  36.838138
 65    20532   2048.0  34.245618
 72    20324   2048.0  35.080057
@@ -22,7 +93,7 @@ seed
 
 ### BacktrackingAIPlayer
 
-`BacktrackingAIPlayer` has accuracy of 32%.
+`BacktrackingAIPlayer` has accuracy of 32% — depth-limited tree search maximizing merge score.
 
 | Search Depth | Pass Rate | Time (100 seeds) |
 | ------------ | --------- | ---------------- |
@@ -45,7 +116,7 @@ Accuracy=4%
 Total Time Taken: 0:00:23.480000
 Average Time Taken: 0.23s
       score  max_val   runtime
-seed                          
+seed
 52    20180   2048.0  3.376090
 86    20336   2048.0  3.415089
 91    20612   2048.0  3.161147
@@ -63,7 +134,7 @@ Accuracy=15%
 Total Time Taken: 0:01:31.510000
 Average Time Taken: 0.92s
       score  max_val    runtime
-seed                           
+seed
 0     20344   2048.0  13.649011
 4     20464   2048.0  13.875819
 6     20204   2048.0  13.452688
@@ -91,7 +162,7 @@ Accuracy=26%
 Total Time Taken: 0:06:26.520000
 Average Time Taken: 3.87s
       score  max_val    runtime
-seed                           
+seed
 4     20208   2048.0  49.506586
 5     20420   2048.0  50.247087
 10    20312   2048.0  49.936312
@@ -132,7 +203,7 @@ Total Time Taken: 0:31:10.410000
 Average Time Taken: 18.7s
 in 100 seeds, the following are passing
         score  max_val     runtime
-seed                            
+seed
 6     20328   2048.0  247.989939
 8     20396   2048.0  260.319733
 10    20368   2048.0  243.177021
@@ -168,3 +239,9 @@ seed
 95    20248   2048.0  177.931139
 ```
 </details>
+
+## Docs
+
+- [`docs/dqn_report.md`](docs/dqn_report.md) — DQN + n-tuple tutorial and full experiment log (Chinese).
+- [`docs/next_steps.md`](docs/next_steps.md) — roadmap (n-tuple + expectimax, DQN extensions, …).
+- [`AGENTS.md`](AGENTS.md) / `CLAUDE.md` — architecture notes and commands for contributors.
