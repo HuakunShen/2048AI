@@ -19,7 +19,7 @@ from collections import deque, Counter
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
-from src.agent.ntuple import NTupleNetwork, play_game
+from src.agent.ntuple import NTupleNetwork, play_game, TUPLE_SETS
 
 
 def evaluate(net: NTupleNetwork, games: int):
@@ -44,6 +44,10 @@ def main():
     parser = argparse.ArgumentParser("2048 n-tuple TD trainer")
     parser.add_argument("--games", type=int, default=20000)
     parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--tuples", choices=list(TUPLE_SETS), default="4",
+                        help="pattern set: '4' (default) or '8' (Track B, larger)")
+    parser.add_argument("--tc", action="store_true",
+                        help="temporal-coherence adaptive per-weight step (Track B)")
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--eval-games", type=int, default=200)
     parser.add_argument("--smoke", action="store_true")
@@ -55,15 +59,17 @@ def main():
         args.eval_games = 50
 
     timestamp = int(time.time())
-    name = f"ntuple_2048_{timestamp}"
+    tag = f"t{args.tuples}{'_tc' if args.tc else ''}"
+    name = f"ntuple_2048_{tag}_{timestamp}"
     ckpt_dir = Path("models") / name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(f"runs/{name}")
     print(f"Checkpoints -> {ckpt_dir}\nTensorBoard -> runs/{name}")
 
-    net = NTupleNetwork(alpha=args.alpha)
+    net = NTupleNetwork(alpha=args.alpha, tuples=TUPLE_SETS[args.tuples], tc=args.tc)
     print(f"n-tuple net: {net.n_tuples} tuples x {net.n_syms} symmetries "
-          f"= {net.n_instances} instances, {len(net.LUT)} LUTs of {net.LUT[0].size:,} each")
+          f"= {net.n_instances} instances, {len(net.LUT)} LUTs of {net.LUT[0].size:,} each "
+          f"| alpha={args.alpha} tc={args.tc}")
 
     recent_score = deque(maxlen=100)
     recent_max = deque(maxlen=100)

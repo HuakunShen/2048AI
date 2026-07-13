@@ -8,4 +8,5 @@ __pycache__/
 .coverage
 models/
 runs/
+scratch_logs/
 .venv
