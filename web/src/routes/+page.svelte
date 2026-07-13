@@ -83,7 +83,7 @@
 	</div>
 
 	<div role="application" aria-label="2048 board" ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
-		<Board board={game.board} hint={game.hintDir} />
+		<Board sprites={game.sprites} hint={game.hintDir} slideMs={game.slideMs} />
 	</div>
 
 	<div class="flex items-center justify-between text-xs text-muted-foreground">

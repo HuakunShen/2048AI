@@ -21,7 +21,12 @@ interface Manifest {
 
 let searcher: Expectimax | null = null;
 
-const modelUrl = (name: string) => `${import.meta.env.BASE_URL}model/${name}`;
+// Set by init() to an absolute `.../model/` URL. The main thread resolves it
+// (base-path aware) and passes it in, because inside the bundled worker
+// `import.meta.env.BASE_URL` is relative to the worker's own chunk path, which
+// in production (`/_app/immutable/workers/…`) points at the wrong directory.
+let modelBase = '/model/';
+const modelUrl = (name: string) => new URL(name, modelBase).href;
 
 async function loadTable(luts: Luts, t: number, nnz: number): Promise<void> {
 	const res = await fetch(modelUrl(`lut${t}.bin`));
@@ -33,8 +38,12 @@ async function loadTable(luts: Luts, t: number, nnz: number): Promise<void> {
 }
 
 const aiApi = {
-	/** Download + scatter the weights and build the searcher. `onProgress(0..1)` fires per table. */
-	async init(onProgress?: (fraction: number) => void): Promise<void> {
+	/**
+	 * Download + scatter the weights and build the searcher. `base` is an absolute
+	 * `.../model/` URL (from the main thread); `onProgress(0..1)` fires per table.
+	 */
+	async init(base: string, onProgress?: (fraction: number) => void): Promise<void> {
+		modelBase = base;
 		if (searcher) {
 			onProgress?.(1);
 			return;

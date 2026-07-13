@@ -7,6 +7,7 @@ import {
 	initBoard,
 	isDone,
 	move,
+	planMove,
 	spawn,
 	tilesToBoard,
 	type Board,
@@ -74,6 +75,38 @@ interface GoldenBoard {
 const golden = JSON.parse(
 	readFileSync(fileURLToPath(new URL('./__fixtures__/golden.json', import.meta.url)), 'utf8')
 ) as { boards: GoldenBoard[] };
+
+describe('planMove slide paths', () => {
+	/** Rebuild the afterstate purely from the slide list (merges = a cell hit twice). */
+	function reconstruct(slides: ReturnType<typeof planMove>['slides']): number[] {
+		const b = new Array<number>(16).fill(0);
+		const hit = new Set<number>();
+		for (const s of slides) {
+			b[s.to] = hit.has(s.to) ? s.exp + 1 : s.exp;
+			hit.add(s.to);
+		}
+		return b;
+	}
+
+	it('matches move() and its slides reconstruct the afterstate (golden boards)', () => {
+		for (const rec of golden.boards) {
+			const b = tilesToBoard(rec.tiles);
+			for (const d of DIRS) {
+				const ref = move(b, d);
+				const plan = planMove(b, d);
+				expect(plan.reward, `reward ${d} on ${rec.tiles}`).toBe(ref.reward);
+				expect(plan.changed, `changed ${d}`).toBe(ref.changed);
+				expect(Array.from(plan.after), `after ${d}`).toEqual(Array.from(ref.after));
+				expect(reconstruct(plan.slides), `slides ${d} on ${rec.tiles}`).toEqual(
+					Array.from(ref.after)
+				);
+				// Every non-empty source cell is accounted for by exactly one slide.
+				const sources = Array.from(b).map((e, i) => (e ? i : -1)).filter((i) => i >= 0);
+				expect(plan.slides.map((s) => s.from).sort((x, y) => x - y)).toEqual(sources);
+			}
+		}
+	});
+});
 
 describe('golden engine parity vs NumpyStaticBoard', () => {
 	it('reproduces afterstate, reward and changed for every recorded board/direction', () => {

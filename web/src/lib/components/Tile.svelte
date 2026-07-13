@@ -1,22 +1,27 @@
 <script lang="ts">
-	import { scale } from 'svelte/transition';
+	import { expToTile } from '$lib/engine/board';
 	import { tileBg, tileFg, tileFontClass } from '$lib/theme';
+	import type { Sprite } from '$lib/game.svelte';
 
-	let { value }: { value: number } = $props();
+	let { sprite }: { sprite: Sprite } = $props();
+
+	const value = $derived(expToTile(sprite.exp));
+	const row = $derived(Math.floor(sprite.index / 4));
+	const col = $derived(sprite.index % 4);
+	const anim = $derived(
+		sprite.popKind === 'merge' ? 't2048-merge' : sprite.popKind === 'spawn' ? 't2048-spawn' : ''
+	);
 </script>
 
-<div class="relative aspect-square rounded-md" style="background-color: {tileBg(0)}">
-	{#if value > 0}
-		{#key value}
-			<div
-				in:scale={{ duration: 110, start: 0.55 }}
-				class="absolute inset-0 flex items-center justify-center rounded-md font-bold tabular-nums {tileFontClass(
-					value
-				)}"
-				style="background-color: {tileBg(value)}; color: {tileFg(value)}"
-			>
-				{value}
-			</div>
-		{/key}
-	{/if}
+<!-- Persistent element: its `transform` (driven by --r/--c) transitions → the tile slides. -->
+<div class="t2048-tile" style="--r:{row}; --c:{col};">
+	<!-- Re-keyed on `pop` so spawn/merge replay their keyframe pop; plain slides don't remount. -->
+	{#key sprite.pop}
+		<div
+			class="t2048-inner {anim} {tileFontClass(value)}"
+			style="background-color: {tileBg(value)}; color: {tileFg(value)};"
+		>
+			{value}
+		</div>
+	{/key}
 </div>

@@ -98,3 +98,67 @@
 		color: hsl(var(--foreground));
 	}
 }
+
+/* --------------------------------------------------------------------------- */
+/* 2048 tile animation.                                                         */
+/* Slides come free from a `transform` transition on a persistent element (its  */
+/* --r/--c change when the tile moves cell). Pops (spawn/merge) are keyframes    */
+/* re-triggered by remounting the inner element (Tile.svelte keys it on `pop`).  */
+/* `--g` (gap) and `--slide` (duration) are set on the board container.          */
+/* --------------------------------------------------------------------------- */
+.t2048-tile {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: calc((100% - 3 * var(--g)) / 4);
+	height: calc((100% - 3 * var(--g)) / 4);
+	transform: translate(calc((100% + var(--g)) * var(--c)), calc((100% + var(--g)) * var(--r)));
+	transition: transform var(--slide, 100ms) ease-in-out;
+	will-change: transform;
+}
+.t2048-inner {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	border-radius: 0.375rem; /* rounded-md */
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+}
+@keyframes t2048-spawn {
+	from {
+		transform: scale(0);
+		opacity: 0;
+	}
+	to {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+@keyframes t2048-merge {
+	0% {
+		transform: scale(1);
+	}
+	50% {
+		transform: scale(1.18);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+.t2048-spawn {
+	animation: t2048-spawn 130ms ease;
+}
+.t2048-merge {
+	animation: t2048-merge 150ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+	.t2048-tile {
+		transition: none;
+	}
+	.t2048-spawn,
+	.t2048-merge {
+		animation: none;
+	}
+}

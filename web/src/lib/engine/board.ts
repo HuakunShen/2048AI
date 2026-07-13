@@ -112,6 +112,82 @@ export interface MoveResult {
 	changed: boolean;
 }
 
+/** A single tile's journey during a move: it slides from board cell `from` to `to`. */
+export interface Slide {
+	from: number; // source board index
+	to: number; // destination board index
+	exp: number; // the tile's exponent *before* the move (pre-merge value)
+	merged: boolean; // true if it lands on a tile it merges with
+}
+
+export interface MovePlan extends MoveResult {
+	/** One entry per non-empty source tile (including tiles that don't move). */
+	slides: Slide[];
+}
+
+/**
+ * Collapse a length-4 exponent line toward index 0, recording where each tile
+ * goes. Greedy left-pairing reproduces `collapseRowLeft`'s merge order exactly
+ * (the golden-parity test asserts the resulting board matches). `to` positions
+ * are line-order indices (0 = the edge the tiles slide toward).
+ */
+function collapseLineWithPaths(exps: number[]): {
+	result: number[];
+	moves: { from: number; to: number; merged: boolean }[];
+} {
+	const n = exps.length;
+	const tiles: { from: number; exp: number }[] = [];
+	for (let i = 0; i < n; i++) if (exps[i] !== 0) tiles.push({ from: i, exp: exps[i] });
+
+	const result = new Array<number>(n).fill(0);
+	const moves: { from: number; to: number; merged: boolean }[] = [];
+	let target = 0;
+	let k = 0;
+	while (k < tiles.length) {
+		if (k + 1 < tiles.length && tiles[k].exp === tiles[k + 1].exp) {
+			result[target] = tiles[k].exp + 1;
+			moves.push({ from: tiles[k].from, to: target, merged: true });
+			moves.push({ from: tiles[k + 1].from, to: target, merged: true });
+			k += 2;
+		} else {
+			result[target] = tiles[k].exp;
+			moves.push({ from: tiles[k].from, to: target, merged: false });
+			k += 1;
+		}
+		target++;
+	}
+	return { result, moves };
+}
+
+/**
+ * Like `move`, but also returns per-tile `slides` so the UI can animate each
+ * tile sliding from its old cell to its new one (and pop merges). `after`,
+ * `reward` and `changed` come from the parity-safe row LUTs; `slides` come from
+ * the path tracer, whose result is asserted equal to `after` in tests.
+ */
+export function planMove(board: Board, dir: Dir): MovePlan {
+	const after = board.slice() as Board;
+	let reward = 0;
+	let changed = false;
+	const slides: Slide[] = [];
+	for (const line of LINES[dir]) {
+		const [a, b, c, d] = line;
+		const exps = [board[a], board[b], board[c], board[d]];
+		const idx = exps[0] | (exps[1] << 4) | (exps[2] << 8) | (exps[3] << 12);
+		const res = ROW_RESULT[idx];
+		reward += ROW_REWARD[idx];
+		if (ROW_CHANGED[idx]) changed = true;
+		after[a] = res & 0xf;
+		after[b] = (res >> 4) & 0xf;
+		after[c] = (res >> 8) & 0xf;
+		after[d] = (res >> 12) & 0xf;
+		for (const m of collapseLineWithPaths(exps).moves) {
+			slides.push({ from: line[m.from], to: line[m.to], exp: exps[m.from], merged: m.merged });
+		}
+	}
+	return { after, reward, changed, slides };
+}
+
 /**
  * Apply `dir` to `board`, returning the afterstate (no tile spawned), the merge
  * reward, and whether the board changed. Does not mutate `board`. Equivalent to
@@ -143,18 +219,23 @@ export type Rng = () => number;
  * (tile 4) w.p. 0.1. Mutates `board`; returns false if the board was full. The
  * spawn *probabilities* match the Python engine; the RNG stream need not.
  */
-export function spawn(board: Board, rng: Rng = Math.random): boolean {
+export function spawnCell(board: Board, rng: Rng = Math.random): number {
 	let count = 0;
 	for (let i = 0; i < N_CELLS; i++) if (board[i] === 0) count++;
-	if (count === 0) return false;
+	if (count === 0) return -1;
 	let pick = Math.floor(rng() * count);
 	for (let i = 0; i < N_CELLS; i++) {
 		if (board[i] === 0 && pick-- === 0) {
 			board[i] = rng() < 0.1 ? 2 : 1;
-			return true;
+			return i;
 		}
 	}
-	return false;
+	return -1;
+}
+
+/** As `spawnCell`, but returns whether a tile was placed (kept for existing callers). */
+export function spawn(board: Board, rng: Rng = Math.random): boolean {
+	return spawnCell(board, rng) >= 0;
 }
 
 /** Fresh board with two tile-2s (exponent 1) on distinct random cells, per `get_init_matrix`. */
