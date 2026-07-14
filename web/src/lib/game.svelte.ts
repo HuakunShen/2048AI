@@ -55,6 +55,12 @@ export function depthCfgFor(level: number): DepthCfg {
 const SLIDE_MS = 100;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Auto-play delay bounds (ms per move). The UI slider shows *speed*, so it maps
+ *  right→fast by mirroring across this range (see Controls.svelte). */
+export const DELAY_MIN = 20;
+export const DELAY_MAX = 600;
+export const DEFAULT_SPEED_MS = 140;
+
 export class Game {
 	H = $state(4);
 	W = $state(4);
@@ -74,7 +80,7 @@ export class Game {
 
 	auto = $state(false);
 	level = $state(2);
-	speedMs = $state(140);
+	speedMs = $state(DEFAULT_SPEED_MS);
 	hintDir = $state<Dir | null>(null);
 
 	onWin: (() => void) | null = null;
