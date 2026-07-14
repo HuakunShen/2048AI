@@ -543,10 +543,18 @@ search:
 | **M2 Pattern Compiler** | ✅ 完成 | [`src/game/symmetry.py`](src/game/symmetry.py), [`src/ntuple/pattern.py`](src/ntuple/pattern.py), [`src/ntuple/library.py`](src/ntuple/library.py) | [`tests/test_pattern.py`](tests/test_pattern.py) (16) |
 | **M3 Universal Greedy** | ✅ 完成 | [`src/ntuple/universal_value.py`](src/ntuple/universal_value.py) | [`tests/test_universal.py`](tests/test_universal.py) (9) |
 | **M4 Conditional Residual** | ✅ 完成 | [`src/ntuple/universal_value.py`](src/ntuple/universal_value.py) (residual head) | [`tests/test_residual.py`](tests/test_residual.py) (6) |
-| **M5 Mixed Curriculum (核心)** | ✅ 核心可用 | [`src/training/`](src/training/) (selfplay/curriculum/evaluator), [`train_universal.py`](train_universal.py) | [`tests/test_training.py`](tests/test_training.py) (3) |
-| **M6 Search (核心)** | ✅ 核心可用 | [`src/search/expectimax.py`](src/search/expectimax.py) | [`tests/test_search.py`](tests/test_search.py) (9) |
+| **M5 Mixed Curriculum** | ✅ 核心 + 并行 | [`src/training/`](src/training/) (selfplay/curriculum/evaluator/**parallel** Hogwild), [`train_universal.py`](train_universal.py) `--workers` | [`tests/test_training.py`](tests/test_training.py) (3), [`tests/test_parallel.py`](tests/test_parallel.py) (2) |
+| **M6 Search** | ✅ 完成 | [`src/search/expectimax.py`](src/search/expectimax.py) | [`tests/test_search.py`](tests/test_search.py) (9) |
+| **M7 Multi-Stage / 32768 Track** | ✅ 完成 | [`src/ntuple/universal_value.py`](src/ntuple/universal_value.py) (multi-stage + lazy weight promotion, `--stages`) | [`tests/test_multistage.py`](tests/test_multistage.py) (9) |
+| **M8 MCTS** | ✅ 研究模块 | [`src/search/mcts.py`](src/search/mcts.py) (stochastic MCTS, n-tuple leaf) | [`tests/test_mcts.py`](tests/test_mcts.py) (10) |
+| **M0 Baseline Freeze** | ✅ 完成 | [`scripts/freeze_baseline.py`](scripts/freeze_baseline.py) → `docs/baseline.json` | — |
+| **Web 变尺寸移植 (M1–M6)** | ✅ 完成 | [`web/src/lib/engine/board.ts`](web/src/lib/engine/board.ts), [`web/src/lib/ai/`](web/src/lib/ai/) (patterns/universal/expectimax/model), [`scripts/export_web_universal.py`](scripts/export_web_universal.py) | 15 web tests + 浏览器验证 |
 
-全套 **94 个新测试通过**（连同既有套件全绿）。
+**全部里程碑 M0–M8 已实现并测试。** 后端全套测试通过；web 15 测试 + 浏览器端到端验证通过。
+
+> **M7 multi-stage** — 按 max-tile 指数阈值分 stage（`--stages 13,15`），每 stage 独立 2D 表 `[n_stages, total]`；**lazy weight promotion**：读取未访问的高 stage 表项时回退到最深已访问的低 stage（value 端），首次更新时从该回退值 seed 后独立更新（§7.1）。测试验证对称保持、promotion 回退、收敛、save/load（含 A 累加器）。
+>
+> **M8 MCTS** — 单智能体随机 MCTS：决策节点 UCT（node 内 Q min-max 归一化以适配价值尺度）+ chance 节点真实 spawn 采样（私有 RNG）；叶子用 `reward + V(afterstate)` 引导（价值函数替代 rollout）。按 §6.4 定位为**研究模块**——需在同预算下稳定胜过 expectimax 才进主路径；测试验证合法性、可复现、预算、训练后强于未训练。
 
 ## 12.2 关键设计落地
 
@@ -608,9 +616,9 @@ search:
 
 ## 12.4 待办里程碑
 
-- **M0 baseline freeze** — 待补：把既有 4×4 `ntuple_2048_t8_tc` 模型指标固化为对照 JSON（`benchmark.py` 已有雏形）。
-- **M4 扩展** — 已完成 role residual（小表 per-x）。仍待：大表 per-role 标量残差、shape/stage 校准 `b,c,g_k`。
-- **M5 并行（✅ 已实现）** — Hogwild 无锁并行训练（`train_universal.py --workers`，多进程共享一份 LUT，实测 24 线程 ~11×，180 g/s）+ 并行评测（`evaluate_universal.py --procs`）。仍待：全尺寸混合 (3–8)、per-bucket 自动重平衡、held-out 泛化协议。
-- **M7 multi-stage weight promotion（✅ 核心已实现）** — `UniversalNTuple(stages=[13,15])`：按 max-tile exponent 阈值分 stage，每 stage 独立表；value 用 **fallback-read**（高 stage 未访问项读最深已访问的低 stage），update 首次访问时 **从低 stage 提升 (promote) 权重** 再独立更新（plan §7.1）。支持并行（2D 共享数组）与 save/load（持久化 stage 配置 + visited 标记）。9 个测试覆盖 fallback / promotion / stage 独立 / 学习 / 持久化 / 并行。CLI：`--stages 13,15`。仍待：redundant encoding、carousel shaping、optimistic init、tile-downgrading search。
-- **M7 32768 Track** — multi-stage + weight promotion、redundant encoding、carousel shaping、optimistic init、tile-downgrading search。
-- **M8 MCTS** — stochastic MCTS / progressive widening 对照。
+**全部 M0–M8 里程碑已实现并测试**（见 §12.1）。以下为各里程碑的可选深化方向（非阻塞，属研究/调优）：
+
+- **M4 扩展** — 大表 per-role 标量残差、shape/stage 校准 `b,c,g_k`。
+- **M5 深化** — 全尺寸混合 (3–8) 长训练、per-bucket 自动重平衡、held-out 泛化协议。（并行训练 `--workers` 已实现，实测 24 线程 ~11×、180 g/s。）
+- **M7 深化** — multi-stage + weight promotion 已实现；仍可加 redundant encoding、carousel shaping、optimistic init、tile-downgrading search 以进一步冲 32768/65536。
+- **M8 深化** — 已有随机 MCTS 研究模块；仍可加 root prior (PUCT)、progressive widening，并做同预算 vs expectimax 的多 seed 对照决定是否进主路径 (§6.4 停止条件)。
