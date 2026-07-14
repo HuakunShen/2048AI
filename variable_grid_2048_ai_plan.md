@@ -593,7 +593,18 @@ search:
 - **专项 pattern 集** `lib.SPECIALIST_4X4` — 2 个小表 (square/line-4) + **5 个不同的 6-tuple 表**（rect_2x3 / corner_6 / snake_6 / row_plus_6 / row_edge_6），对应更强的 4×4 容量（≈ 文献 8×6-tuple 网络）。alphabet=18 下 681MB (W)，×3 (TC) ≈ 2GB。
 - CLI：`train_universal.py --patterns specialist --alphabet 18 --shapes 4x4`；`evaluate_universal.py --expectimax` 做深度搜索评测。
 
-**下一步（提升高 tile 的关键，按 ROI）**：① 深度自适应 expectimax（最大即时杠杆，文献上把 value fn 的到达率显著抬高）② multi-stage + weight promotion（§7.1，文献冲击 32768 的核心）③ 更长训练（高 tile 状态访问稀疏，需 10⁵–10⁶ 局）④ redundant encoding / carousel shaping / optimistic init。
+**实测（4×4 专项，alphabet 18，50k 局单核训练 ~98min，300 局评测）**：
+
+| 方法 | →2048 | →4096 | →8192 | →16384 | best tile | mean score |
+|------|-------|-------|-------|--------|-----------|-----------|
+| greedy（无搜索） | 94% | 58% | 9% | 0% | 8192 | 62k |
+| **depth-3 expectimax** | **100%** | **98%** | **70%** | **5%** | **16384** | **136k** |
+
+> 搜索把 mean score 翻倍（62k→136k），天花板从 8192 提到 **16384**（5% 局达到），8192 到达率 9%→70%。**当前最好的 4×4 结果 = 16384 tile。65536 / 131072 目前还达不到**——需要更长训练（→32768）+ multi-stage + 更深搜索；65536/131072 属于 SOTA 前沿的运气尾部事件。
+
+**并行加速（已实现）**：Hogwild 无锁并行训练（多进程共享一份 LUT，`train_universal.py --workers`）+ 并行评测（`evaluate_universal.py --procs`），把原本单核的训练/评测铺满所有核心（24 线程机器 ~15–20×），使 10⁵–10⁶ 局的长训练变得可行。
+
+**下一步（提升高 tile 的关键，按 ROI）**：① ✅ 深度 expectimax（已验证：8192 率 9%→70%，出 16384）② ✅ 并行训练（已实现，解锁长训练）③ multi-stage + weight promotion（§7.1，文献冲击 32768 的核心）④ 10⁵–10⁶ 局长训练 ⑤ redundant encoding / carousel shaping / optimistic init。
 
 ## 12.4 待办里程碑
 
