@@ -59,6 +59,19 @@ def main() -> None:
             raise SystemExit("no universal model found under models/universal_*/")
         model = cands[-1]
 
+    # The browser value function is base-only and has no notion of stages, so a
+    # multi-stage (M7) checkpoint cannot be exported faithfully: its value depends
+    # on which stage a board is in, and shipping stage-0 tables would silently give
+    # wrong late-game values. Reject it up front with an actionable message rather
+    # than dying inside load() on the stage-config mismatch.
+    with np.load(model, allow_pickle=False) as _d:
+        saved_stages = _d["stages"].tolist() if "stages" in _d else []
+    if saved_stages:
+        raise SystemExit(
+            f"{model} is a multi-stage checkpoint (stages={saved_stages}), which the "
+            "browser value function does not support (it evaluates the base tables "
+            "only). Export a model trained without --stages.")
+
     patterns = _PAT[args.patterns]
     if args.alphabet != 16:
         patterns = lib.with_alphabet(patterns, args.alphabet)

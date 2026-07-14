@@ -43,9 +43,6 @@ DIR_TO_STR = {v: k for k, v in DIR_FROM_STR.items()}
 
 MAX_EXPONENT = 15               # tiles clipped to 2**15 = 32768 in the LUT alphabet
 
-# Powers of two as int64 so merge rewards never overflow an int8 shift in numba.
-_POW2 = (np.int64(2) ** np.arange(20)).astype(np.int64)
-
 
 @njit(cache=True)
 def _move(board, direction):
@@ -85,7 +82,11 @@ def _move(board, direction):
         while i < m:
             if i + 1 < m and seq[i] == seq[i + 1]:
                 mval = seq[i] + 1
-                reward += _POW2[mval]
+                # int64 shift, not a fixed power-of-two table: a big board can
+                # legally reach exponents past any table we'd size here, and
+                # numba runs without bounds checks (an OOB read would silently
+                # corrupt the reward). ``seq`` is int64, so this cannot overflow.
+                reward += np.int64(1) << mval
                 pos = k if toward_zero else n - 1 - k
                 if horizontal:
                     out[li, pos] = mval

@@ -26,11 +26,44 @@ export type ShapeValueFn = (board: Board) => number;
 
 export class Expectimax {
 	private tt = new Map<string, number>();
+	private rngState: number;
 
 	constructor(
 		private readonly engine: Engine,
-		private readonly value: ShapeValueFn
-	) {}
+		private readonly value: ShapeValueFn,
+		seed = 0x2048
+	) {
+		this.rngState = seed >>> 0 || 1;
+	}
+
+	/** xorshift32 — a private, deterministic stream (never perturbs the game RNG). */
+	private rand(): number {
+		let x = this.rngState;
+		x ^= x << 13;
+		x >>>= 0;
+		x ^= x >>> 17;
+		x ^= x << 5;
+		x >>>= 0;
+		this.rngState = x;
+		return x / 4294967296;
+	}
+
+	/**
+	 * Unbiased `k`-subset of `cells` (partial Fisher–Yates), mirroring Python's
+	 * `rng.choice(..., replace=False)`. Slicing the first `k` instead would only
+	 * ever expand the lowest-index (top-left) empties, biasing the chance node
+	 * away from the uniform spawn distribution the engine actually samples.
+	 */
+	private sample(cells: number[], k: number): number[] {
+		const a = cells.slice();
+		for (let i = 0; i < k; i++) {
+			const j = i + Math.floor(this.rand() * (a.length - i));
+			const t = a[i];
+			a[i] = a[j];
+			a[j] = t;
+		}
+		return a.slice(0, k);
+	}
 
 	private keyOf(board: Board, depth: number): string {
 		let s = '';
@@ -62,7 +95,7 @@ export class Expectimax {
 			return v;
 		}
 
-		const cells = empties.length > maxChance ? empties.slice(0, maxChance) : empties;
+		const cells = empties.length > maxChance ? this.sample(empties, maxChance) : empties;
 		let total = 0;
 		for (const cell of cells) {
 			for (const [tile, p] of SPAWN_TILES) {
