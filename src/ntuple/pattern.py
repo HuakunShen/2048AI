@@ -112,7 +112,13 @@ def compile_pattern(pattern: Pattern, H: int, W: int) -> CompiledPattern:
 
 
 def schema_hash(patterns: List[Pattern]) -> str:
-    """Stable fingerprint of a pattern set (order-independent per pattern id)."""
+    """Stable fingerprint of a pattern *set* (order-independent per pattern id).
+
+    Deliberately order-independent, so it identifies "which patterns" but **not**
+    "in which order". Layout compatibility (positional LUT offsets, per-tuple cell
+    order) is therefore *not* something this hash can certify — that is enforced
+    separately by the ordered-schema check in ``UniversalNTuple.load``.
+    """
     parts = []
     for p in sorted(patterns, key=lambda q: q.id):
         parts.append(f"{p.id}:{p.alphabet}:{sorted(p.cells)}")

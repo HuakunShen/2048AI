@@ -26,6 +26,7 @@ kernels index without Python-object churn; TC accumulators ``E``/``A`` mirror it
 """
 from __future__ import annotations
 
+import ast
 from typing import List
 
 import numpy as np
@@ -340,6 +341,20 @@ class UniversalNTuple:
             raise ValueError(
                 f"pattern schema mismatch: checkpoint {loaded_hash} != model "
                 f"{self.hash}; refusing to load (plan §9.2 fail-fast).")
+        # ``schema_hash`` sorts patterns and cells, so it cannot see a *reordering*.
+        # But the LUT offsets are positional and each tuple's index is built from its
+        # cell order, so a reordered pattern list (or reordered cells) is an
+        # incompatible layout that would silently return wrong values. Compare the
+        # ordered schema that save() already persists.
+        if "schema" in data and data["schema"].size:
+            saved_schema = ast.literal_eval(data["schema"].tobytes().decode())
+            cur_schema = [{"id": p.id, "cells": list(p.cells), "alphabet": p.alphabet}
+                          for p in self.patterns]
+            if saved_schema != cur_schema:
+                raise ValueError(
+                    "pattern schema order mismatch: the checkpoint's pattern/cell "
+                    "ordering differs from this model's, so its LUT offsets and tuple "
+                    "indices would be misread; refusing to load (plan §9.2 fail-fast).")
         saved_stages = tuple(data["stages"].tolist()) if "stages" in data else ()
         if saved_stages != self.stage_thresholds:
             raise ValueError(
@@ -351,5 +366,9 @@ class UniversalNTuple:
         if self.n_stages > 1 and "A" in data and data["A"].size:
             self.A = data["A"].astype(np.float32)
         if "R" in data and self.residual:
+            # rho scales the residual inside value(), so it is an *inference* param:
+            # restore it, or a model trained with a non-default --rho is evaluated
+            # with the residual term mis-scaled.
+            self.rho = float(data["rho"])
             self.R = data["R"].astype(np.float32)
             self.res_offsets = data["res_offsets"].astype(np.int64)
