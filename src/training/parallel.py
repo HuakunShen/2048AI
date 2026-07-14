@@ -44,15 +44,17 @@ def build_net(cfg: Dict) -> UniversalNTuple:
         patterns = lib.with_alphabet(patterns, cfg["alphabet"])
     return UniversalNTuple(patterns=patterns, alpha=cfg["alpha"], tc=cfg["tc"],
                            residual=cfg["residual"], rho=cfg["rho"],
-                           alpha_residual=cfg["alpha_residual"])
+                           alpha_residual=cfg["alpha_residual"],
+                           stages=cfg.get("stages"))
 
 
 def _make_raws(net: UniversalNTuple) -> Dict:
-    """Allocate shared RawArrays sized to the net's tables."""
-    raws = {"LUT": mp.RawArray("f", net.total)}
+    """Allocate shared RawArrays sized to the net's tables (× n_stages)."""
+    n = net.n_stages * net.total
+    raws = {"LUT": mp.RawArray("f", n)}
     if net.tc:
-        raws["E"] = mp.RawArray("f", net.total)
-        raws["A"] = mp.RawArray("f", net.total)
+        raws["E"] = mp.RawArray("f", n)
+        raws["A"] = mp.RawArray("f", n)
     if net.residual and net.res_total:
         raws["R"] = mp.RawArray("f", net.res_total)
         raws["RE"] = mp.RawArray("f", net.res_total)
@@ -62,10 +64,11 @@ def _make_raws(net: UniversalNTuple) -> Dict:
 
 def _bind(net: UniversalNTuple, raws: Dict) -> UniversalNTuple:
     """Rebind a net's arrays onto shared RawArrays (in place)."""
-    net.LUT = np.frombuffer(raws["LUT"], dtype=np.float32)
+    shape = (net.n_stages, net.total) if net.n_stages > 1 else (net.total,)
+    net.LUT = np.frombuffer(raws["LUT"], dtype=np.float32).reshape(shape)
     if net.tc:
-        net.E = np.frombuffer(raws["E"], dtype=np.float32)
-        net.A = np.frombuffer(raws["A"], dtype=np.float32)
+        net.E = np.frombuffer(raws["E"], dtype=np.float32).reshape(shape)
+        net.A = np.frombuffer(raws["A"], dtype=np.float32).reshape(shape)
     if net.residual and net.res_total:
         net.R = np.frombuffer(raws["R"], dtype=np.float32)
         net.RE = np.frombuffer(raws["RE"], dtype=np.float32)

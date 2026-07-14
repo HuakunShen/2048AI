@@ -130,6 +130,54 @@ def _pattern_update_tc_res(exp, cells, pow_, roles, lut, acc_e, acc_a, base_off,
         res_a[e] += abs(delta)
 
 
+@njit(cache=True)
+def _pattern_value_ms(exp, cells, pow_, lut, acc_a, offset, stage):
+    """Multi-stage placement mean with lazy weight promotion (plan §7.1).
+
+    ``lut``/``acc_a`` are 2D ``[n_stages, total]``. An entry that has never been
+    visited at ``stage`` (``acc_a[stage,e] == 0``) reads the deepest *visited*
+    lower stage instead — so a high stage inherits the lower stage's learned
+    value until it accumulates its own evidence.
+    """
+    n, L = cells.shape
+    s = 0.0
+    for i in range(n):
+        idx = 0
+        for j in range(L):
+            idx += exp[cells[i, j]] * pow_[j]
+        e = offset + idx
+        st = stage
+        while st > 0 and acc_a[st, e] == 0.0:
+            st -= 1
+        s += lut[st, e]
+    return s / n
+
+
+@njit(cache=True)
+def _pattern_update_tc_ms(exp, cells, pow_, lut, acc_e, acc_a, offset, stage,
+                          alpha, delta):
+    """Multi-stage TC update. First visit to a stage-``s`` entry seeds it from the
+    deepest visited lower stage (weight promotion), then it updates independently.
+    """
+    n, L = cells.shape
+    step = delta / n
+    for i in range(n):
+        idx = 0
+        for j in range(L):
+            idx += exp[cells[i, j]] * pow_[j]
+        e = offset + idx
+        if stage > 0 and acc_a[stage, e] == 0.0:
+            st = stage - 1
+            while st > 0 and acc_a[st, e] == 0.0:
+                st -= 1
+            lut[stage, e] = lut[st, e]              # promote from lower stage
+        a = acc_a[stage, e]
+        lr = (abs(acc_e[stage, e]) / a) if a > 0.0 else 1.0
+        lut[stage, e] += alpha * lr * step
+        acc_e[stage, e] += delta
+        acc_a[stage, e] += abs(delta)
+
+
 def _flat_exp(board: np.ndarray, max_exp: int = MAX_EXPONENT) -> np.ndarray:
     """Flat int64 exponents clipped to ``max_exp`` for LUT indexing."""
     e = np.ascontiguousarray(board, dtype=np.int64).reshape(-1)
@@ -141,9 +189,18 @@ class UniversalNTuple:
 
     def __init__(self, patterns: List = None, alpha: float = 0.5, tc: bool = True,
                  residual: bool = False, rho: float = 0.25,
-                 alpha_residual: float = 0.1):
+                 alpha_residual: float = 0.1, stages=None):
         if residual and not tc:
             raise ValueError("residual head currently requires tc=True")
+        # Multi-stage weight promotion (plan §7.1): separate table sets per game
+        # stage, split by max-tile exponent thresholds. Stage s inherits stage
+        # s-1's weights on first visit, then updates independently.
+        self.stage_thresholds = tuple(sorted(int(s) for s in stages)) if stages else ()
+        self.n_stages = len(self.stage_thresholds) + 1
+        if self.n_stages > 1 and not tc:
+            raise ValueError("multi-stage requires tc=True")
+        if self.n_stages > 1 and residual:
+            raise ValueError("multi-stage + residual not supported together")
         self.patterns = list(patterns if patterns is not None else lib.DEFAULT_PATTERNS)
         self.compiler = PatternCompiler(self.patterns)
         self.alpha = alpha
@@ -159,10 +216,11 @@ class UniversalNTuple:
         sizes = np.array([p.table_size for p in self.patterns], dtype=np.int64)
         self.offsets = np.concatenate(([0], np.cumsum(sizes)[:-1])).astype(np.int64)
         self.total = int(sizes.sum())
-        self.LUT = np.zeros(self.total, dtype=np.float32)
+        shape = (self.n_stages, self.total) if self.n_stages > 1 else (self.total,)
+        self.LUT = np.zeros(shape, dtype=np.float32)
         if tc:
-            self.E = np.zeros(self.total, dtype=np.float32)
-            self.A = np.zeros(self.total, dtype=np.float32)
+            self.E = np.zeros(shape, dtype=np.float32)
+            self.A = np.zeros(shape, dtype=np.float32)
         else:
             self.E = self.A = None
 
@@ -193,10 +251,28 @@ class UniversalNTuple:
                                       self.patterns[k].table_size, self.rho)
         return _pattern_value(exp, cp.cells, cp.pow, self.LUT, self.offsets[k])
 
+    def _stage(self, board: np.ndarray) -> int:
+        """Game stage from the board's max-tile exponent (0 if no staging)."""
+        if not self.stage_thresholds:
+            return 0
+        me = min(int(board.max()), self.max_exponent) if board.size else 0
+        st = 0
+        for thr in self.stage_thresholds:
+            if me >= thr:
+                st += 1
+        return st
+
     def value(self, board: np.ndarray) -> float:
         exp = _flat_exp(board, self.max_exponent)
         cs = self.compiler.get(*board.shape)
         total = 0.0
+        if self.n_stages > 1:
+            stage = self._stage(board)
+            for k, cp in enumerate(cs.compiled):
+                if cp.n_instances:
+                    total += _pattern_value_ms(exp, cp.cells, cp.pow, self.LUT,
+                                               self.A, self.offsets[k], stage)
+            return float(total)
         for k, cp in enumerate(cs.compiled):
             if cp.n_instances:
                 total += self._pattern_v(exp, cp, k)
@@ -206,6 +282,20 @@ class UniversalNTuple:
         """Afterstate TD update of ``V(board)`` toward ``target``; returns old V."""
         exp = _flat_exp(board, self.max_exponent)
         cs = self.compiler.get(*board.shape)
+        if self.n_stages > 1:
+            stage = self._stage(board)
+            v = 0.0
+            for k, cp in enumerate(cs.compiled):
+                if cp.n_instances:
+                    v += _pattern_value_ms(exp, cp.cells, cp.pow, self.LUT,
+                                           self.A, self.offsets[k], stage)
+            delta = target - v
+            for k, cp in enumerate(cs.compiled):
+                if cp.n_instances:
+                    _pattern_update_tc_ms(exp, cp.cells, cp.pow, self.LUT, self.E,
+                                          self.A, self.offsets[k], stage,
+                                          self.alpha, delta)
+            return float(v)
         v = 0.0
         for k, cp in enumerate(cs.compiled):
             if cp.n_instances:
@@ -233,10 +323,14 @@ class UniversalNTuple:
     def save(self, path: str):
         schema = [{"id": p.id, "cells": list(p.cells), "alphabet": p.alphabet}
                   for p in self.patterns]
+        # Multi-stage value() needs the visited markers (A) to do fallback reads,
+        # so persist A when staged (compresses well — unvisited entries are 0).
+        A_save = self.A if self.n_stages > 1 else np.zeros(0, dtype=np.float32)
         np.savez_compressed(
             path, LUT=self.LUT, offsets=self.offsets, alpha=self.alpha,
             tc=self.tc, hash=self.hash, residual=self.residual, rho=self.rho,
             R=self.R, res_offsets=self.res_offsets,
+            stages=np.array(self.stage_thresholds, dtype=np.int64), A=A_save,
             schema=np.frombuffer(repr(schema).encode(), dtype=np.uint8))
 
     def load(self, path: str):
@@ -246,9 +340,16 @@ class UniversalNTuple:
             raise ValueError(
                 f"pattern schema mismatch: checkpoint {loaded_hash} != model "
                 f"{self.hash}; refusing to load (plan §9.2 fail-fast).")
+        saved_stages = tuple(data["stages"].tolist()) if "stages" in data else ()
+        if saved_stages != self.stage_thresholds:
+            raise ValueError(
+                f"stage config mismatch: checkpoint {saved_stages} != model "
+                f"{self.stage_thresholds}; refusing to load.")
         self.LUT = data["LUT"].astype(np.float32)
         self.offsets = data["offsets"].astype(np.int64)
         self.alpha = float(data["alpha"])
+        if self.n_stages > 1 and "A" in data and data["A"].size:
+            self.A = data["A"].astype(np.float32)
         if "R" in data and self.residual:
             self.R = data["R"].astype(np.float32)
             self.res_offsets = data["res_offsets"].astype(np.int64)

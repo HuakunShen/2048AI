@@ -60,6 +60,9 @@ def main():
                    help="enable the M4 per-role residual head (small patterns)")
     p.add_argument("--rho", type=float, default=0.25)
     p.add_argument("--alpha-residual", type=float, default=0.1)
+    p.add_argument("--stages", default="",
+                   help="multi-stage exponent thresholds, e.g. 13,15 (M7 weight "
+                        "promotion; splits tables by max-tile stage)")
     p.add_argument("--eval-every", type=int, default=2000)
     p.add_argument("--eval-games", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
@@ -76,10 +79,11 @@ def main():
                 "specialist": lib.SPECIALIST_4X4}[args.patterns]
     if args.alphabet != 16:
         patterns = lib.with_alphabet(patterns, args.alphabet)
+    stages = [int(s) for s in args.stages.split(",")] if args.stages else None
     quota = TransitionQuota(shapes, weights)
     net = UniversalNTuple(patterns=patterns, alpha=args.alpha, tc=not args.no_tc,
                           residual=args.residual, rho=args.rho,
-                          alpha_residual=args.alpha_residual)
+                          alpha_residual=args.alpha_residual, stages=stages)
 
     name = f"universal_{'x'.join(f'{h}-{w}' for h, w in shapes)}_{int(time.time())}"
     ckpt_dir = Path("models") / name
@@ -110,7 +114,8 @@ def main():
     if workers > 1:
         cfg = {"patterns": args.patterns, "alphabet": args.alphabet,
                "alpha": args.alpha, "tc": not args.no_tc, "residual": args.residual,
-               "rho": args.rho, "alpha_residual": args.alpha_residual}
+               "rho": args.rho, "alpha_residual": args.alpha_residual,
+               "stages": stages}
         net = train_parallel(cfg, shapes, weights, workers, args.games,
                              args.eval_every, eval_cb=run_eval, seed=args.seed)
     else:

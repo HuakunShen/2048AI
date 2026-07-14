@@ -609,7 +609,8 @@ search:
 ## 12.4 待办里程碑
 
 - **M0 baseline freeze** — 待补：把既有 4×4 `ntuple_2048_t8_tc` 模型指标固化为对照 JSON（`benchmark.py` 已有雏形）。
-- **M4 扩展** — 已完成 role residual（小表 per-x）。仍待：大表 per-role 标量残差、shape/stage 校准 `b,c,g_k`、stage 分段。
-- **M5 完整** — 全尺寸混合 (3–8)、per-bucket 自动重平衡、并行 worker、held-out 泛化评测。
+- **M4 扩展** — 已完成 role residual（小表 per-x）。仍待：大表 per-role 标量残差、shape/stage 校准 `b,c,g_k`。
+- **M5 并行（✅ 已实现）** — Hogwild 无锁并行训练（`train_universal.py --workers`，多进程共享一份 LUT，实测 24 线程 ~11×，180 g/s）+ 并行评测（`evaluate_universal.py --procs`）。仍待：全尺寸混合 (3–8)、per-bucket 自动重平衡、held-out 泛化协议。
+- **M7 multi-stage weight promotion（✅ 核心已实现）** — `UniversalNTuple(stages=[13,15])`：按 max-tile exponent 阈值分 stage，每 stage 独立表；value 用 **fallback-read**（高 stage 未访问项读最深已访问的低 stage），update 首次访问时 **从低 stage 提升 (promote) 权重** 再独立更新（plan §7.1）。支持并行（2D 共享数组）与 save/load（持久化 stage 配置 + visited 标记）。9 个测试覆盖 fallback / promotion / stage 独立 / 学习 / 持久化 / 并行。CLI：`--stages 13,15`。仍待：redundant encoding、carousel shaping、optimistic init、tile-downgrading search。
 - **M7 32768 Track** — multi-stage + weight promotion、redundant encoding、carousel shaping、optimistic init、tile-downgrading search。
 - **M8 MCTS** — stochastic MCTS / progressive widening 对照。

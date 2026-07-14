@@ -39,17 +39,17 @@ def parse_adaptive(tokens):
     return [(float(a.split(":")[0]), int(a.split(":")[1])) for a in tokens]
 
 
-def _load_net(model, patterns_name, alphabet, residual):
+def _load_net(model, patterns_name, alphabet, residual, stages):
     patterns = _PAT[patterns_name]()
     if alphabet != 16:
         patterns = lib.with_alphabet(patterns, alphabet)
-    net = UniversalNTuple(patterns=patterns, residual=residual)
+    net = UniversalNTuple(patterns=patterns, residual=residual, stages=stages)
     net.load(model)
     return net
 
 
-def _init(model, patterns_name, alphabet, residual):
-    _WORKER["net"] = _load_net(model, patterns_name, alphabet, residual)
+def _init(model, patterns_name, alphabet, residual, stages):
+    _WORKER["net"] = _load_net(model, patterns_name, alphabet, residual, stages)
 
 
 def _chunk(args):
@@ -94,6 +94,7 @@ def main():
     p.add_argument("--alphabet", type=int, default=16)
     p.add_argument("--shapes", nargs="+", default=["4x4"])
     p.add_argument("--residual", action="store_true")
+    p.add_argument("--stages", default="", help="e.g. 13,15 (must match training)")
     p.add_argument("--games", type=int, default=300)
     p.add_argument("--procs", type=int, default=0, help="0 = auto (cores-1)")
     p.add_argument("--expectimax", action="store_true")
@@ -114,8 +115,10 @@ def main():
 
     t0 = time.time()
     ctx = mp.get_context("fork")
+    stages = [int(s) for s in args.stages.split(",")] if args.stages else None
     with ctx.Pool(procs, initializer=_init,
-                  initargs=(args.model, args.patterns, args.alphabet, args.residual)) as pool:
+                  initargs=(args.model, args.patterns, args.alphabet,
+                            args.residual, stages)) as pool:
         for H, W in shapes:
             s = parallel_eval(pool, H, W, args.games, None, None)
             print("  [greedy]     " + format_stats(s))
