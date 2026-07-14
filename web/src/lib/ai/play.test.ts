@@ -1,59 +1,76 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { allocLuts, makeValue, N_TUPLES, scatterInto, type ValueFn } from './ntuple';
+import { buildValue, type Manifest } from './model';
 import { Expectimax, type DepthCfg } from './expectimax';
-import { initBoard, move, spawn, maxExp, expToTile, type Board } from '../engine/board';
+import { Engine, expToTile, type Board } from '../engine/board';
+import type { UniversalValue } from './universal';
 
 /**
- * Full-stack AI integration: runs the exact `Expectimax` + `makeValue` code the
- * Web Worker uses (in Node, without the kkrpc plumbing) to play complete games,
- * proving the browser AI actually plays strongly — not just that V() matches.
+ * Full-stack AI integration: runs the exact `Engine` + `UniversalValue` +
+ * `Expectimax` code the Web Worker uses (in Node) to play complete games on
+ * several board shapes with one model — proving the variable-grid browser AI
+ * actually plays, not just that V() matches.
  */
-function loadValue(): ValueFn {
-	const dir = fileURLToPath(new URL('../../../static/model/', import.meta.url));
-	const manifest = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8'));
-	const luts = allocLuts();
-	for (let t = 0; t < N_TUPLES; t++) {
-		const nnz = manifest.counts[t];
-		const raw = readFileSync(dir + `lut${t}.bin`);
-		const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-		scatterInto(luts[t], new Uint32Array(ab, 0, nnz), new Float32Array(ab, nnz * 4, nnz));
-	}
-	return makeValue(luts);
+const dir = fileURLToPath(new URL('../../../static/model/', import.meta.url));
+
+function loadValue(): UniversalValue {
+	const manifest = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8')) as Manifest;
+	const buffers = manifest.patterns.map((_, k) =>
+		manifest.parts[k].map((_p, p) => {
+			const raw = readFileSync(dir + `lut${k}_${p}.bin`);
+			return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+		})
+	);
+	return buildValue(manifest, buffers);
 }
 
-function playGame(ai: Expectimax, cfg: DepthCfg): { maxTile: number; moves: number } {
-	let board: Board = initBoard();
+function playGame(eng: Engine, value: UniversalValue, cfg: DepthCfg) {
+	const ai = new Expectimax(eng, (b: Board) => value.value(b, eng.H, eng.W));
+	let board = eng.initBoard();
 	let moves = 0;
 	for (;;) {
 		const { dir } = ai.getMove(board, cfg);
 		if (!dir) break;
-		const { after, changed } = move(board, dir);
+		const { after, changed } = eng.move(board, dir);
 		if (!changed) break;
-		spawn(after);
+		eng.spawn(after);
 		board = after;
-		moves++;
-		if (moves > 20000) break; // safety
+		if (++moves > 20000) break;
 	}
-	return { maxTile: expToTile(maxExp(board)), moves };
+	return { maxTile: expToTile(eng.maxExp(board)), moves };
 }
 
-describe('AI integration — plays real games to a high tile', () => {
-	it('reaches the 2048 tile at expectimax depth 2', () => {
-		const ai = new Expectimax(loadValue());
-		const cfg: DepthCfg = { depth: 2 };
-		let bestTile = 0;
-		const results: string[] = [];
-		for (let g = 0; g < 3; g++) {
-			const t0 = performance.now();
-			const { maxTile, moves } = playGame(ai, cfg);
-			results.push(`tile=${maxTile} moves=${moves} in ${Math.round(performance.now() - t0)}ms`);
-			bestTile = Math.max(bestTile, maxTile);
-			if (bestTile >= 2048) break; // one win is enough to prove the pipeline
+describe('variable-grid AI integration — one model plays multiple shapes', () => {
+	const value = loadValue();
+	const cfg: DepthCfg = { depth: 2 };
+
+	it('reaches 2048 on 4x4 (depth-2)', () => {
+		const eng = new Engine(4, 4);
+		let best = 0;
+		const log: string[] = [];
+		for (let g = 0; g < 3 && best < 2048; g++) {
+			const { maxTile, moves } = playGame(eng, value, cfg);
+			log.push(`tile=${maxTile} moves=${moves}`);
+			best = Math.max(best, maxTile);
 		}
-		console.log('[depth-2 games]', results.join(' | '));
-		// depth-2 reaches 2048 ~96% of the time, so 3 tries essentially never all fail.
-		expect(bestTile, `max tiles: ${results.join(', ')}`).toBeGreaterThanOrEqual(2048);
+		console.log('[4x4 depth-2]', log.join(' | '));
+		expect(best, log.join(', ')).toBeGreaterThanOrEqual(2048);
+	}, 120_000);
+
+	it('plays a full 5x5 game and reaches a high tile', () => {
+		const eng = new Engine(5, 5);
+		const { maxTile, moves } = playGame(eng, value, cfg);
+		console.log(`[5x5 depth-2] tile=${maxTile} moves=${moves}`);
+		expect(moves).toBeGreaterThan(50);
+		expect(maxTile).toBeGreaterThanOrEqual(2048);
+	}, 120_000);
+
+	it('plays a non-square 3x4 game to completion', () => {
+		const eng = new Engine(3, 4);
+		const { maxTile, moves } = playGame(eng, value, cfg);
+		console.log(`[3x4 depth-2] tile=${maxTile} moves=${moves}`);
+		expect(moves).toBeGreaterThan(10);
+		expect(maxTile).toBeGreaterThanOrEqual(256);
 	}, 120_000);
 });

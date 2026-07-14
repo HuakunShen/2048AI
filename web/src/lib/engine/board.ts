@@ -1,110 +1,25 @@
 /**
- * 2048 game engine — a faithful TypeScript port of the Python row-LUT engine
- * (`src/game/model/vectorboard.py` + `staticboardImpl.py`).
+ * Generic H×W 2048 engine — a TypeScript port of `src/game/board.py`.
  *
- * A board is a `Uint8Array(16)` of **exponents** in row-major order (index =
- * row*4 + col): 0 = empty, k = tile 2^k. A single move decomposes into four
- * independent length-4 line collapses, and a line of 4 exponents (each 0..15)
- * has only 16^4 = 65536 states — so we precompute the collapse-toward-index-0
- * ("LEFT" primitive) transition tables once and every move becomes table lookups.
+ * A board is a `Uint8Array(H*W)` of **exponents** in row-major order
+ * (index = row*W + col): 0 = empty, k = tile 2^k. Unlike the original 4×4-only
+ * engine (which used length-4 row lookup tables), this collapses each line with a
+ * generic gather→merge→place pass, so it supports any board shape. The slide/merge
+ * semantics are identical to the Python engine (`_move` / `collapse`), verified by
+ * the golden-parity test on 4×4.
  *
- * The tables are built by porting `collapse_array(reverse=True)` exactly, so this
- * reproduces the Python engine's slide/merge/scoring bit-for-bit (verified by the
- * golden-parity test).
+ * Shape lives in an {@link Engine} instance; the encoding helpers and direction
+ * constants below are shape-independent module exports.
  */
 
 export type Dir = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 
-/** Directions in the exact order of Python's `ARROW_KEYS` — matters for argmax tie-breaks. */
+/** Directions in the exact order of Python's `DIRECTIONS` — matters for argmax tie-breaks. */
 export const DIRS: readonly Dir[] = ['UP', 'DOWN', 'LEFT', 'RIGHT'] as const;
 
-export type Board = Uint8Array; // length 16, exponents 0..15
+export type Board = Uint8Array; // length H*W, exponents 0..MAX_EXPONENT
 
-const GRID = 4;
-const N_CELLS = GRID * GRID;
-const N_ROW_STATES = 16 ** GRID; // 65536
-
-// --------------------------------------------------------------------------- //
-// Row-LUT construction (port of vectorboard._build_row_luts + collapse_array).
-// --------------------------------------------------------------------------- //
-
-/**
- * Collapse a length-4 tile-value row toward index 0 (the LEFT/UP primitive,
- * `reverse=True`), mutating `arr`. Returns the merge score and whether it moved.
- * Direct port of `NumpyStaticBoard.collapse_array(arr, reverse=True)`.
- */
-function collapseRowLeft(arr: number[]): { score: number; changed: boolean } {
-	const n = arr.length;
-	let changed = false;
-	let score = 0;
-	const hasMerged = new Uint8Array(n);
-	for (let i = 1; i < n; i++) {
-		let curr = i;
-		for (let next = i - 1; next >= 0; next--) {
-			if (arr[next] === 0 && arr[curr] !== 0) {
-				arr[next] = arr[curr];
-				arr[curr] = 0;
-				curr = next;
-				changed = true;
-			} else if (arr[curr] === arr[next] && !hasMerged[next] && arr[curr] !== 0) {
-				arr[next] *= 2;
-				arr[curr] = 0;
-				hasMerged[next] = 1;
-				score += arr[next];
-				changed = true;
-				break;
-			} else {
-				break;
-			}
-		}
-	}
-	return { score, changed };
-}
-
-// ROW_RESULT holds the collapsed row re-packed base-16 (Int32 to tolerate the
-// pathological 2^16 overflow exactly like numpy; nibbles are masked on read).
-const ROW_RESULT = new Int32Array(N_ROW_STATES);
-const ROW_REWARD = new Int32Array(N_ROW_STATES);
-const ROW_CHANGED = new Uint8Array(N_ROW_STATES);
-
-(function buildRowLuts() {
-	const tiles = new Array<number>(GRID);
-	for (let index = 0; index < N_ROW_STATES; index++) {
-		for (let c = 0; c < GRID; c++) {
-			const e = (index >> (4 * c)) & 0xf;
-			tiles[c] = e === 0 ? 0 : 1 << e;
-		}
-		const { score, changed } = collapseRowLeft(tiles);
-		let outIndex = 0;
-		for (let c = 0; c < GRID; c++) {
-			const v = tiles[c];
-			const e = v === 0 ? 0 : Math.round(Math.log2(v));
-			outIndex += e << (4 * c); // unmasked, matching numpy's out_index
-		}
-		ROW_RESULT[index] = outIndex;
-		ROW_REWARD[index] = score;
-		ROW_CHANGED[index] = changed ? 1 : 0;
-	}
-})();
-
-// --------------------------------------------------------------------------- //
-// Line layouts: for each direction, the 4 lines, each as 4 board indices in
-// collapse order (position 0 = the edge the tiles slide toward).
-// --------------------------------------------------------------------------- //
-const LINES: Record<Dir, number[][]> = (() => {
-	const idx = (r: number, c: number) => r * GRID + c;
-	const up: number[][] = [];
-	const down: number[][] = [];
-	const left: number[][] = [];
-	const right: number[][] = [];
-	for (let k = 0; k < GRID; k++) {
-		left.push([idx(k, 0), idx(k, 1), idx(k, 2), idx(k, 3)]);
-		right.push([idx(k, 3), idx(k, 2), idx(k, 1), idx(k, 0)]);
-		up.push([idx(0, k), idx(1, k), idx(2, k), idx(3, k)]);
-		down.push([idx(3, k), idx(2, k), idx(1, k), idx(0, k)]);
-	}
-	return { UP: up, DOWN: down, LEFT: left, RIGHT: right };
-})();
+export const MAX_EXPONENT = 17; // tiles up to 2^17 = 131072 (alphabet 18)
 
 export interface MoveResult {
 	after: Board;
@@ -114,186 +29,219 @@ export interface MoveResult {
 
 /** A single tile's journey during a move: it slides from board cell `from` to `to`. */
 export interface Slide {
-	from: number; // source board index
-	to: number; // destination board index
-	exp: number; // the tile's exponent *before* the move (pre-merge value)
-	merged: boolean; // true if it lands on a tile it merges with
+	from: number;
+	to: number;
+	exp: number; // exponent *before* the move
+	merged: boolean;
 }
 
 export interface MovePlan extends MoveResult {
-	/** One entry per non-empty source tile (including tiles that don't move). */
 	slides: Slide[];
-}
-
-/**
- * Collapse a length-4 exponent line toward index 0, recording where each tile
- * goes. Greedy left-pairing reproduces `collapseRowLeft`'s merge order exactly
- * (the golden-parity test asserts the resulting board matches). `to` positions
- * are line-order indices (0 = the edge the tiles slide toward).
- */
-function collapseLineWithPaths(exps: number[]): {
-	result: number[];
-	moves: { from: number; to: number; merged: boolean }[];
-} {
-	const n = exps.length;
-	const tiles: { from: number; exp: number }[] = [];
-	for (let i = 0; i < n; i++) if (exps[i] !== 0) tiles.push({ from: i, exp: exps[i] });
-
-	const result = new Array<number>(n).fill(0);
-	const moves: { from: number; to: number; merged: boolean }[] = [];
-	let target = 0;
-	let k = 0;
-	while (k < tiles.length) {
-		if (k + 1 < tiles.length && tiles[k].exp === tiles[k + 1].exp) {
-			result[target] = tiles[k].exp + 1;
-			moves.push({ from: tiles[k].from, to: target, merged: true });
-			moves.push({ from: tiles[k + 1].from, to: target, merged: true });
-			k += 2;
-		} else {
-			result[target] = tiles[k].exp;
-			moves.push({ from: tiles[k].from, to: target, merged: false });
-			k += 1;
-		}
-		target++;
-	}
-	return { result, moves };
-}
-
-/**
- * Like `move`, but also returns per-tile `slides` so the UI can animate each
- * tile sliding from its old cell to its new one (and pop merges). `after`,
- * `reward` and `changed` come from the parity-safe row LUTs; `slides` come from
- * the path tracer, whose result is asserted equal to `after` in tests.
- */
-export function planMove(board: Board, dir: Dir): MovePlan {
-	const after = board.slice() as Board;
-	let reward = 0;
-	let changed = false;
-	const slides: Slide[] = [];
-	for (const line of LINES[dir]) {
-		const [a, b, c, d] = line;
-		const exps = [board[a], board[b], board[c], board[d]];
-		const idx = exps[0] | (exps[1] << 4) | (exps[2] << 8) | (exps[3] << 12);
-		const res = ROW_RESULT[idx];
-		reward += ROW_REWARD[idx];
-		if (ROW_CHANGED[idx]) changed = true;
-		after[a] = res & 0xf;
-		after[b] = (res >> 4) & 0xf;
-		after[c] = (res >> 8) & 0xf;
-		after[d] = (res >> 12) & 0xf;
-		for (const m of collapseLineWithPaths(exps).moves) {
-			slides.push({ from: line[m.from], to: line[m.to], exp: exps[m.from], merged: m.merged });
-		}
-	}
-	return { after, reward, changed, slides };
-}
-
-/**
- * Apply `dir` to `board`, returning the afterstate (no tile spawned), the merge
- * reward, and whether the board changed. Does not mutate `board`. Equivalent to
- * `NumpyStaticBoard.move(board, dir, inplace=False)`.
- */
-export function move(board: Board, dir: Dir): MoveResult {
-	const after = board.slice() as Board;
-	let reward = 0;
-	let changed = false;
-	for (const line of LINES[dir]) {
-		const [a, b, c, d] = line;
-		const idx = board[a] | (board[b] << 4) | (board[c] << 8) | (board[d] << 12);
-		const res = ROW_RESULT[idx];
-		reward += ROW_REWARD[idx];
-		if (ROW_CHANGED[idx]) changed = true;
-		after[a] = res & 0xf;
-		after[b] = (res >> 4) & 0xf;
-		after[c] = (res >> 8) & 0xf;
-		after[d] = (res >> 12) & 0xf;
-	}
-	return { after, reward, changed };
 }
 
 /** An RNG returning a float in [0, 1). Defaults to `Math.random`. */
 export type Rng = () => number;
 
-/**
- * Spawn one tile on a random empty cell: exponent 1 (tile 2) w.p. 0.9, exponent 2
- * (tile 4) w.p. 0.1. Mutates `board`; returns false if the board was full. The
- * spawn *probabilities* match the Python engine; the RNG stream need not.
- */
-export function spawnCell(board: Board, rng: Rng = Math.random): number {
-	let count = 0;
-	for (let i = 0; i < N_CELLS; i++) if (board[i] === 0) count++;
-	if (count === 0) return -1;
-	let pick = Math.floor(rng() * count);
-	for (let i = 0; i < N_CELLS; i++) {
-		if (board[i] === 0 && pick-- === 0) {
-			board[i] = rng() < 0.1 ? 2 : 1;
-			return i;
-		}
+export class Engine {
+	readonly H: number;
+	readonly W: number;
+	readonly nCells: number;
+	/** For each direction, the list of lines; each line is board indices in
+	 *  collapse order (position 0 = the edge tiles slide toward). */
+	private readonly lines: Record<Dir, number[][]>;
+
+	constructor(H: number, W: number) {
+		this.H = H;
+		this.W = W;
+		this.nCells = H * W;
+		this.lines = this.buildLines();
 	}
-	return -1;
-}
 
-/** As `spawnCell`, but returns whether a tile was placed (kept for existing callers). */
-export function spawn(board: Board, rng: Rng = Math.random): boolean {
-	return spawnCell(board, rng) >= 0;
-}
+	private buildLines(): Record<Dir, number[][]> {
+		const { H, W } = this;
+		const idx = (r: number, c: number) => r * W + c;
+		const up: number[][] = [];
+		const down: number[][] = [];
+		const left: number[][] = [];
+		const right: number[][] = [];
+		for (let r = 0; r < H; r++) {
+			const row: number[] = [];
+			for (let c = 0; c < W; c++) row.push(idx(r, c));
+			left.push(row);
+			right.push([...row].reverse());
+		}
+		for (let c = 0; c < W; c++) {
+			const col: number[] = [];
+			for (let r = 0; r < H; r++) col.push(idx(r, c));
+			up.push(col);
+			down.push([...col].reverse());
+		}
+		return { UP: up, DOWN: down, LEFT: left, RIGHT: right };
+	}
 
-/** Fresh board with two tile-2s (exponent 1) on distinct random cells, per `get_init_matrix`. */
-export function initBoard(rng: Rng = Math.random): Board {
-	const b = new Uint8Array(N_CELLS) as Board;
-	const a = Math.floor(rng() * N_CELLS);
-	b[a] = 1;
-	let c = Math.floor(rng() * (N_CELLS - 1));
-	if (c >= a) c++; // uniform over the remaining 15 cells
-	b[c] = 1;
-	return b;
-}
+	empty(): Board {
+		return new Uint8Array(this.nCells) as Board;
+	}
 
-/** Game over iff no empty cell and no orthogonally-adjacent equal pair. */
-export function isDone(board: Board): boolean {
-	for (let i = 0; i < N_CELLS; i++) if (board[i] === 0) return false;
-	for (let r = 0; r < GRID; r++)
-		for (let c = 0; c < GRID - 1; c++)
-			if (board[r * GRID + c] === board[r * GRID + c + 1]) return false;
-	for (let r = 0; r < GRID - 1; r++)
-		for (let c = 0; c < GRID; c++)
-			if (board[r * GRID + c] === board[(r + 1) * GRID + c]) return false;
-	return true;
-}
+	/**
+	 * Apply `dir`, returning the afterstate (no spawn), merge reward, and whether
+	 * the board changed. Does not mutate `board`. Equivalent to
+	 * `board.move(board, dir)` in Python.
+	 */
+	move(board: Board, dir: Dir): MoveResult {
+		const after = this.empty();
+		let reward = 0;
+		let changed = false;
+		for (const line of this.lines[dir]) {
+			const n = line.length;
+			// gather non-zero exponents nearest-wall-first (line is already ordered
+			// so index 0 is the wall).
+			let m = 0;
+			const seq = new Array<number>(n);
+			for (let j = 0; j < n; j++) {
+				const v = board[line[j]];
+				if (v !== 0) seq[m++] = v;
+			}
+			// merge equal neighbours once, writing straight into `after`.
+			let k = 0;
+			let i = 0;
+			while (i < m) {
+				if (i + 1 < m && seq[i] === seq[i + 1]) {
+					const mv = seq[i] + 1;
+					reward += 1 << mv;
+					after[line[k++]] = mv;
+					i += 2;
+				} else {
+					after[line[k++]] = seq[i];
+					i += 1;
+				}
+			}
+			// did this line change?
+			for (let j = 0; j < n; j++) {
+				if (after[line[j]] !== board[line[j]]) {
+					changed = true;
+					break;
+				}
+			}
+		}
+		return { after, reward, changed };
+	}
 
-/** True if any tile reaches `goalExp` (default 11 = tile 2048). */
-export function hasWon(board: Board, goalExp = 11): boolean {
-	for (let i = 0; i < N_CELLS; i++) if (board[i] >= goalExp) return true;
-	return false;
-}
+	/** Like {@link move}, but records per-tile slides for animation. */
+	planMove(board: Board, dir: Dir): MovePlan {
+		const after = this.empty();
+		let reward = 0;
+		let changed = false;
+		const slides: Slide[] = [];
+		for (const line of this.lines[dir]) {
+			const n = line.length;
+			const tiles: { pos: number; exp: number }[] = [];
+			for (let j = 0; j < n; j++) if (board[line[j]] !== 0) tiles.push({ pos: j, exp: board[line[j]] });
+			let k = 0;
+			let t = 0;
+			while (t < tiles.length) {
+				if (t + 1 < tiles.length && tiles[t].exp === tiles[t + 1].exp) {
+					const mv = tiles[t].exp + 1;
+					reward += 1 << mv;
+					after[line[k]] = mv;
+					slides.push({ from: line[tiles[t].pos], to: line[k], exp: tiles[t].exp, merged: true });
+					slides.push({ from: line[tiles[t + 1].pos], to: line[k], exp: tiles[t + 1].exp, merged: true });
+					k++;
+					t += 2;
+				} else {
+					after[line[k]] = tiles[t].exp;
+					slides.push({ from: line[tiles[t].pos], to: line[k], exp: tiles[t].exp, merged: false });
+					k++;
+					t += 1;
+				}
+			}
+			for (let j = 0; j < n; j++) if (after[line[j]] !== board[line[j]]) { changed = true; break; }
+		}
+		return { after, reward, changed, slides };
+	}
 
-/** Largest exponent on the board. */
-export function maxExp(board: Board): number {
-	let m = 0;
-	for (let i = 0; i < N_CELLS; i++) if (board[i] > m) m = board[i];
-	return m;
-}
+	/** All four afterstates, indexed by {@link DIRS} order. */
+	allAfterstates(board: Board): MoveResult[] {
+		return DIRS.map((d) => this.move(board, d));
+	}
 
-/** Are there any legal moves' worth checking — used to detect a stuck board. */
-export function anyMove(board: Board): boolean {
-	for (const d of DIRS) if (move(board, d).changed) return true;
-	return false;
+	/**
+	 * Spawn one tile on a random empty cell: exponent 1 (tile 2) w.p. 0.9,
+	 * exponent 2 (tile 4) w.p. 0.1. Mutates `board`; returns the cell index or -1.
+	 */
+	spawnCell(board: Board, rng: Rng = Math.random): number {
+		let count = 0;
+		for (let i = 0; i < this.nCells; i++) if (board[i] === 0) count++;
+		if (count === 0) return -1;
+		let pick = Math.floor(rng() * count);
+		for (let i = 0; i < this.nCells; i++) {
+			if (board[i] === 0 && pick-- === 0) {
+				board[i] = rng() < 0.1 ? 2 : 1;
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	spawn(board: Board, rng: Rng = Math.random): boolean {
+		return this.spawnCell(board, rng) >= 0;
+	}
+
+	/** Fresh board with two tile-2s on distinct random cells. */
+	initBoard(rng: Rng = Math.random): Board {
+		const b = this.empty();
+		const a = Math.floor(rng() * this.nCells);
+		b[a] = 1;
+		let c = Math.floor(rng() * (this.nCells - 1));
+		if (c >= a) c++;
+		b[c] = 1;
+		return b;
+	}
+
+	/** Game over iff no empty cell and no orthogonally-adjacent equal pair. */
+	isDone(board: Board): boolean {
+		const { H, W } = this;
+		for (let i = 0; i < this.nCells; i++) if (board[i] === 0) return false;
+		for (let r = 0; r < H; r++)
+			for (let c = 0; c < W - 1; c++)
+				if (board[r * W + c] === board[r * W + c + 1]) return false;
+		for (let r = 0; r < H - 1; r++)
+			for (let c = 0; c < W; c++)
+				if (board[r * W + c] === board[(r + 1) * W + c]) return false;
+		return true;
+	}
+
+	hasWon(board: Board, goalExp = 11): boolean {
+		for (let i = 0; i < this.nCells; i++) if (board[i] >= goalExp) return true;
+		return false;
+	}
+
+	maxExp(board: Board): number {
+		let m = 0;
+		for (let i = 0; i < this.nCells; i++) if (board[i] > m) m = board[i];
+		return m;
+	}
+
+	anyMove(board: Board): boolean {
+		for (const d of DIRS) if (this.move(board, d).changed) return true;
+		return false;
+	}
 }
 
 // --------------------------------------------------------------------------- //
-// Encoding helpers (exponent <-> tile value), used by the UI and golden tests.
+// Encoding helpers (shape-independent).
 // --------------------------------------------------------------------------- //
 export const expToTile = (e: number): number => (e === 0 ? 0 : 2 ** e);
 export const tileToExp = (v: number): number => (v === 0 ? 0 : Math.round(Math.log2(v)));
 
 export function tilesToBoard(tiles: ArrayLike<number>): Board {
-	const b = new Uint8Array(N_CELLS) as Board;
-	for (let i = 0; i < N_CELLS; i++) b[i] = tileToExp(tiles[i]);
+	const b = new Uint8Array(tiles.length) as Board;
+	for (let i = 0; i < tiles.length; i++) b[i] = tileToExp(tiles[i]);
 	return b;
 }
 
 export function boardToTiles(board: ArrayLike<number>): number[] {
-	const out = new Array<number>(N_CELLS);
-	for (let i = 0; i < N_CELLS; i++) out[i] = expToTile(board[i]);
+	const out = new Array<number>(board.length);
+	for (let i = 0; i < board.length; i++) out[i] = expToTile(board[i]);
 	return out;
 }

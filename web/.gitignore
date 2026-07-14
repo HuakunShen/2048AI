@@ -27,5 +27,5 @@ test-results
 .dev.vars*
 !.dev.vars.example
 
-# generated model weights (regenerate with scripts/export_web_model.py)
+# generated model weights (regenerate with scripts/export_web_universal.py)
 static/model/

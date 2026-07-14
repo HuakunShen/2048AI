@@ -110,8 +110,8 @@
 	position: absolute;
 	top: 0;
 	left: 0;
-	width: calc((100% - 3 * var(--g)) / 4);
-	height: calc((100% - 3 * var(--g)) / 4);
+	width: calc((100% - (var(--cols) - 1) * var(--g)) / var(--cols));
+	height: calc((100% - (var(--rows) - 1) * var(--g)) / var(--rows));
 	transform: translate(calc((100% + var(--g)) * var(--c)), calc((100% + var(--g)) * var(--r)));
 	transition: transform var(--slide, 100ms) ease-in-out;
 	will-change: transform;
