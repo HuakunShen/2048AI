@@ -6,7 +6,7 @@
 	import { toggleMode } from 'mode-watcher';
 	import Board from '$lib/components/Board.svelte';
 	import Controls from '$lib/components/Controls.svelte';
-	import { Game } from '$lib/game.svelte';
+	import { Game, SHAPES } from '$lib/game.svelte';
 	import type { Dir } from '$lib/engine/board';
 
 	const game = new Game();
@@ -82,8 +82,23 @@
 		</div>
 	</div>
 
+	<div class="flex flex-col gap-1.5">
+		<span class="text-xs text-muted-foreground">Board size · one AI plays them all</span>
+		<div class="flex flex-wrap gap-1.5">
+			{#each SHAPES as s (s.label)}
+				<Button
+					class="h-8 px-2.5 text-xs"
+					variant={game.H === s.H && game.W === s.W ? 'default' : 'outline'}
+					onclick={() => game.setShape(s.H, s.W)}
+				>
+					{s.label}
+				</Button>
+			{/each}
+		</div>
+	</div>
+
 	<div role="application" aria-label="2048 board" ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
-		<Board sprites={game.sprites} hint={game.hintDir} slideMs={game.slideMs} />
+		<Board sprites={game.sprites} H={game.H} W={game.W} hint={game.hintDir} slideMs={game.slideMs} />
 	</div>
 
 	<div class="flex items-center justify-between text-xs text-muted-foreground">

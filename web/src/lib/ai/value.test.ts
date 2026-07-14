@@ -1,52 +1,69 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { allocLuts, makeValue, N_TUPLES, scatterInto } from './ntuple';
+import { buildValue, type Manifest } from './model';
+import { compilePattern, coreLibrary } from './patterns';
 import { tilesToBoard } from '../engine/board';
 
 /**
- * Loads the exported sparse weights into dense tables and checks the ported
- * `value()` reproduces Python `NTupleNetwork.value()` bit-for-bit (both accumulate
- * the same float32 table entries in float64, in the same order → ~exact match).
+ * Verifies the ported universal value function reproduces the Python
+ * `UniversalNTuple.value()` (base path) for every golden board across shapes,
+ * and that the TS pattern compiler produces the identical placements as Python.
  */
-function loadLuts() {
-	const dir = fileURLToPath(new URL('../../../static/model/', import.meta.url));
-	const manifest = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8'));
-	const luts = allocLuts();
-	for (let t = 0; t < N_TUPLES; t++) {
-		const nnz = manifest.counts[t];
-		const raw = readFileSync(dir + `lut${t}.bin`);
-		const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-		const indices = new Uint32Array(ab, 0, nnz);
-		const values = new Float32Array(ab, nnz * 4, nnz);
-		scatterInto(luts[t], indices, values);
-	}
-	return { luts, manifest };
+const dir = fileURLToPath(new URL('../../../static/model/', import.meta.url));
+
+function loadValue() {
+	const manifest = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8')) as Manifest;
+	const buffers = manifest.patterns.map((_, k) =>
+		manifest.parts[k].map((_p, p) => {
+			const raw = readFileSync(dir + `lut${k}_${p}.bin`);
+			return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+		})
+	);
+	return buildValue(manifest, buffers);
 }
 
-interface GoldenBoard {
+interface Golden {
+	shape: [number, number];
 	tiles: number[];
 	value: number;
 }
-const golden = JSON.parse(
-	readFileSync(fileURLToPath(new URL('../engine/__fixtures__/golden.json', import.meta.url)), 'utf8')
-) as { boards: GoldenBoard[] };
+const golden = JSON.parse(readFileSync(dir + 'golden.json', 'utf8')) as Golden[];
 
-describe('golden value() parity vs NTupleNetwork.value', () => {
-	it('manifest matches the ported table geometry', () => {
-		const { manifest } = loadLuts();
-		expect(manifest.nTuples).toBe(N_TUPLES);
-		expect(manifest.tableSize).toBe(16 ** 6);
-	});
-
-	it('reproduces V(board) for every golden board', () => {
-		const { luts } = loadLuts();
-		const value = makeValue(luts);
+describe('universal value() parity vs Python', () => {
+	it('reproduces base V(board) for every golden board and shape', () => {
+		const value = loadValue();
 		let maxDiff = 0;
-		for (const rec of golden.boards) {
-			const v = value(tilesToBoard(rec.tiles));
+		for (const rec of golden) {
+			const [H, W] = rec.shape;
+			const v = value.value(tilesToBoard(rec.tiles), H, W);
 			maxDiff = Math.max(maxDiff, Math.abs(v - rec.value));
 		}
 		expect(maxDiff).toBeLessThan(1e-2);
+	});
+});
+
+// --- placement compiler golden (does not need the model) ------------------- //
+const placements = JSON.parse(
+	readFileSync(fileURLToPath(new URL('./__fixtures__/placements.json', import.meta.url)), 'utf8')
+) as Record<string, Record<string, number[][]>>;
+
+describe('pattern compiler matches Python placements', () => {
+	it('produces the identical instance set per shape/pattern', () => {
+		const core = coreLibrary(16);
+		for (const [shape, byPat] of Object.entries(placements)) {
+			const [H, W] = shape.split('x').map(Number);
+			for (const p of core) {
+				const cp = compilePattern(p, H, W);
+				const got: string[] = [];
+				for (let i = 0; i < cp.nInstances; i++) {
+					const row: number[] = [];
+					for (let j = 0; j < cp.L; j++) row.push(cp.cells[i * cp.L + j]);
+					got.push(row.join(','));
+				}
+				const want = byPat[p.id].map((r) => r.join(','));
+				expect(got.slice().sort(), `${shape} ${p.id}`).toEqual(want.slice().sort());
+			}
+		}
 	});
 });

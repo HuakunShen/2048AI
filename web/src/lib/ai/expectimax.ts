@@ -1,15 +1,12 @@
 /**
- * Expectimax search over afterstates with an n-tuple leaf evaluator — a port of
- * `src/agent/expectimax.py`.
+ * Generic expectimax over afterstates — a port of `src/search/expectimax.py`.
  *
- * The tree alternates MAX nodes (our move) and CHANCE nodes (the random tile
- * spawn: 2 w.p. 0.9, 4 w.p. 0.1). `depth == 1` reduces to the greedy n-tuple
- * player, `a* = argmax_a [reward(s,a) + V(afterstate)]`. A transposition table
- * memoizes chance-node values within a single root search, and adaptive depth
- * searches deeper as the board fills.
+ * Alternates MAX nodes (our move) and CHANCE nodes (random spawn: 2 w.p. 0.9,
+ * 4 w.p. 0.1). `depth == 1` reduces to greedy `a* = argmax_a [r + V(after)]`.
+ * Works on any board shape via an {@link Engine}; adaptive depth uses the empty
+ * **ratio** so large boards search shallow when open and deeper in the endgame.
  */
-import { DIRS, move, type Board, type Dir } from '../engine/board';
-import type { ValueFn } from './ntuple';
+import { DIRS, type Board, type Dir, Engine } from '../engine/board';
 
 /** Spawned tile as exponent + probability: 2 (exp 1) w.p. .9, 4 (exp 2) w.p. .1. */
 const SPAWN_TILES: readonly [number, number][] = [
@@ -18,55 +15,87 @@ const SPAWN_TILES: readonly [number, number][] = [
 ];
 
 export interface DepthCfg {
-	/** Base search depth in move plies; 1 == greedy. */
 	depth: number;
-	/** Optional `[maxEmpty, depth]` rules (first match wins) overriding `depth` per move. */
+	/** `[maxEmptyRatio, depth]` rules (first match wins) overriding `depth`. */
 	adaptive?: [number, number][];
-	/** Expand at most this many empty cells at a chance node (default 16 ≥ 15, so full). */
+	elseDepth?: number;
 	maxChanceCells?: number;
 }
 
-function keyOf(board: Board, depth: number): string {
-	let s = '';
-	for (let i = 0; i < 16; i++) s += board[i].toString(16); // 16 nibbles, 0..f
-	return s + depth;
-}
+export type ShapeValueFn = (board: Board) => number;
 
 export class Expectimax {
-	private readonly value: ValueFn;
 	private tt = new Map<string, number>();
+	private rngState: number;
 
-	constructor(value: ValueFn) {
-		this.value = value;
+	constructor(
+		private readonly engine: Engine,
+		private readonly value: ShapeValueFn,
+		seed = 0x2048
+	) {
+		this.rngState = seed >>> 0 || 1;
+	}
+
+	/** xorshift32 — a private, deterministic stream (never perturbs the game RNG). */
+	private rand(): number {
+		let x = this.rngState;
+		x ^= x << 13;
+		x >>>= 0;
+		x ^= x >>> 17;
+		x ^= x << 5;
+		x >>>= 0;
+		this.rngState = x;
+		return x / 4294967296;
+	}
+
+	/**
+	 * Unbiased `k`-subset of `cells` (partial Fisher–Yates), mirroring Python's
+	 * `rng.choice(..., replace=False)`. Slicing the first `k` instead would only
+	 * ever expand the lowest-index (top-left) empties, biasing the chance node
+	 * away from the uniform spawn distribution the engine actually samples.
+	 */
+	private sample(cells: number[], k: number): number[] {
+		const a = cells.slice();
+		for (let i = 0; i < k; i++) {
+			const j = i + Math.floor(this.rand() * (a.length - i));
+			const t = a[i];
+			a[i] = a[j];
+			a[j] = t;
+		}
+		return a.slice(0, k);
+	}
+
+	private keyOf(board: Board, depth: number): string {
+		let s = '';
+		for (let i = 0; i < board.length; i++) s += String.fromCharCode(board[i] + 1);
+		return s + ':' + depth;
 	}
 
 	private effectiveDepth(board: Board, cfg: DepthCfg): number {
 		if (!cfg.adaptive || cfg.adaptive.length === 0) return cfg.depth;
 		let nEmpty = 0;
-		for (let i = 0; i < 16; i++) if (board[i] === 0) nEmpty++;
-		for (const [maxEmpty, d] of cfg.adaptive) if (nEmpty <= maxEmpty) return d;
-		return cfg.adaptive[cfg.adaptive.length - 1][1];
+		for (let i = 0; i < board.length; i++) if (board[i] === 0) nEmpty++;
+		const ratio = nEmpty / board.length;
+		for (const [maxRatio, d] of cfg.adaptive) if (ratio <= maxRatio) return d;
+		return cfg.elseDepth ?? 1;
 	}
 
-	/** Expected value of an afterstate: leaf V at depth 0, else a chance node. */
 	private evaluateAfterstate(after: Board, depth: number, maxChance: number): number {
 		if (depth <= 0) return this.value(after);
 
-		const key = keyOf(after, depth);
+		const key = this.keyOf(after, depth);
 		const cached = this.tt.get(key);
 		if (cached !== undefined) return cached;
 
 		const empties: number[] = [];
-		for (let i = 0; i < 16; i++) if (after[i] === 0) empties.push(i);
+		for (let i = 0; i < after.length; i++) if (after[i] === 0) empties.push(i);
 		if (empties.length === 0) {
 			const v = this.value(after);
 			this.tt.set(key, v);
 			return v;
 		}
 
-		// maxChance defaults to 16 ≥ the 15-cell max, so the full expansion always
-		// runs (matching the Python default). The slice is a deterministic fallback.
-		const cells = empties.length > maxChance ? empties.slice(0, maxChance) : empties;
+		const cells = empties.length > maxChance ? this.sample(empties, maxChance) : empties;
 		let total = 0;
 		for (const cell of cells) {
 			for (const [tile, p] of SPAWN_TILES) {
@@ -80,11 +109,10 @@ export class Expectimax {
 		return v;
 	}
 
-	/** MAX node: best over valid moves of reward + deeper afterstate value. */
 	private bestActionValue(state: Board, depth: number, maxChance: number): number {
 		let best = -Infinity;
 		for (const d of DIRS) {
-			const { after, reward, changed } = move(state, d);
+			const { after, reward, changed } = this.engine.move(state, d);
 			if (!changed) continue;
 			const val = reward + this.evaluateAfterstate(after, depth - 1, maxChance);
 			if (val > best) best = val;
@@ -92,15 +120,14 @@ export class Expectimax {
 		return best === -Infinity ? 0 : best;
 	}
 
-	/** Root MAX node: return the best direction (and its value), or `null` if stuck. */
 	getMove(board: Board, cfg: DepthCfg): { dir: Dir | null; value: number } {
 		this.tt.clear();
 		const depth = this.effectiveDepth(board, cfg);
-		const maxChance = cfg.maxChanceCells ?? 16;
+		const maxChance = cfg.maxChanceCells ?? 8;
 		let bestDir: Dir | null = null;
 		let bestVal = -Infinity;
 		for (const d of DIRS) {
-			const { after, reward, changed } = move(board, d);
+			const { after, reward, changed } = this.engine.move(board, d);
 			if (!changed) continue;
 			const val = reward + this.evaluateAfterstate(after, depth - 1, maxChance);
 			if (val > bestVal) {

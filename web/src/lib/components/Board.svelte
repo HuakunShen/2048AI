@@ -6,20 +6,27 @@
 
 	let {
 		sprites,
+		H = 4,
+		W = 4,
 		hint = null,
 		slideMs = 100
-	}: { sprites: Sprite[]; hint?: Dir | null; slideMs?: number } = $props();
+	}: { sprites: Sprite[]; H?: number; W?: number; hint?: Dir | null; slideMs?: number } = $props();
 
 	const ARROW = { UP: ArrowUp, DOWN: ArrowDown, LEFT: ArrowLeft, RIGHT: ArrowRight };
 </script>
 
-<!-- --g must match the grid gap/padding below so the tile layer lines up with the cells. -->
-<div class="relative aspect-square w-full select-none" style="--g: 0.5rem; --slide: {slideMs}ms;">
-	<!-- Static background: the 4×4 grid of empty cells. -->
+<!-- --g must match the grid gap/padding below so the tile layer lines up with the cells.
+     --cols/--rows drive the generic tile sizing in app.css; aspect-ratio keeps cells square. -->
+<div
+	class="relative w-full select-none"
+	style="--g: 0.5rem; --slide: {slideMs}ms; --cols: {W}; --rows: {H}; aspect-ratio: {W} / {H};"
+>
+	<!-- Static background: the H×W grid of empty cells. -->
 	<div
-		class="grid h-full w-full grid-cols-4 grid-rows-4 gap-2 rounded-xl bg-[#bbada0] p-2 shadow-lg"
+		class="grid h-full w-full gap-2 rounded-xl bg-[#bbada0] p-2 shadow-lg"
+		style="grid-template-columns: repeat({W}, minmax(0, 1fr)); grid-template-rows: repeat({H}, minmax(0, 1fr));"
 	>
-		{#each Array.from({ length: 16 }) as _, i (i)}
+		{#each Array.from({ length: H * W }) as _, i (i)}
 			<div class="rounded-md bg-[#cdc1b4]"></div>
 		{/each}
 	</div>
@@ -27,7 +34,7 @@
 	<!-- Moving layer: absolutely-positioned tiles, inset to match the grid's p-2 padding. -->
 	<div class="pointer-events-none absolute inset-2">
 		{#each sprites as s (s.id)}
-			<Tile sprite={s} />
+			<Tile sprite={s} cols={W} />
 		{/each}
 	</div>
 

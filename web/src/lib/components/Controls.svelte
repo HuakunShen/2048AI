@@ -1,11 +1,27 @@
 <script lang="ts">
 	import { Button, Progress, Slider } from '@kksh/svelte5';
 	import { Gauge, Lightbulb, Pause, Play, RotateCcw, StepForward } from 'lucide-svelte';
-	import { STRENGTHS, type Game } from '$lib/game.svelte';
+	import {
+		DEFAULT_SPEED_MS,
+		DELAY_MAX,
+		DELAY_MIN,
+		STRENGTHS,
+		type Game
+	} from '$lib/game.svelte';
 
 	let { game }: { game: Game } = $props();
 
 	const playable = $derived(game.aiReady && game.status === 'playing');
+
+	// The engine wants a *delay* (ms/move), but a "speed" slider must run
+	// slow→fast left→right. So the slider tracks speed and we mirror it onto the
+	// delay: the right end (DELAY_MAX) maps to the smallest delay (DELAY_MIN).
+	const toDelay = (s: number) => DELAY_MIN + DELAY_MAX - s;
+
+	let speed = $state(toDelay(DEFAULT_SPEED_MS));
+	$effect(() => {
+		game.speedMs = toDelay(speed);
+	});
 </script>
 
 <div class="flex w-full flex-col gap-4">
@@ -62,6 +78,6 @@
 			<span class="flex items-center gap-1.5"><Gauge class="size-3.5" /> Auto-play speed</span>
 			<span class="tabular-nums">{game.speedMs} ms/move</span>
 		</div>
-		<Slider type="single" min={20} max={600} step={20} bind:value={game.speedMs} />
+		<Slider type="single" min={DELAY_MIN} max={DELAY_MAX} step={20} bind:value={speed} />
 	</div>
 </div>

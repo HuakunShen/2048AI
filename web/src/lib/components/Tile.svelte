@@ -3,11 +3,11 @@
 	import { tileBg, tileFg, tileFontClass } from '$lib/theme';
 	import type { Sprite } from '$lib/game.svelte';
 
-	let { sprite }: { sprite: Sprite } = $props();
+	let { sprite, cols = 4 }: { sprite: Sprite; cols?: number } = $props();
 
 	const value = $derived(expToTile(sprite.exp));
-	const row = $derived(Math.floor(sprite.index / 4));
-	const col = $derived(sprite.index % 4);
+	const row = $derived(Math.floor(sprite.index / cols));
+	const col = $derived(sprite.index % cols);
 	const anim = $derived(
 		sprite.popKind === 'merge' ? 't2048-merge' : sprite.popKind === 'spawn' ? 't2048-spawn' : ''
 	);

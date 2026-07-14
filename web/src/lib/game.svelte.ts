@@ -1,38 +1,35 @@
 /**
- * Reactive game controller (Svelte 5 runes). Owns the board/score state, the
- * shared engine calls, and the AI worker handle. Human moves and AI moves go
- * through the same `applyDir` path.
+ * Reactive game controller (Svelte 5 runes) for a variable H×W board. Owns the
+ * board/score state, a shape-bound {@link Engine}, and the AI worker handle.
+ * Human and AI moves share the same `applyDir` path.
  *
  * Rendering uses a **stable-id sprite model** so tiles can animate: each move is
- * two-phase — phase 1 slides every existing sprite to its destination cell (the
- * board/score state is committed immediately), then a deferred `finalize`
- * collapses merged pairs (pop) and adds the freshly spawned tile (pop). The
- * board itself stays the source of truth for game logic; sprites are the view.
+ * two-phase — phase 1 slides every existing sprite to its destination cell (state
+ * committed immediately), then a deferred `finalize` collapses merged pairs (pop)
+ * and adds the freshly spawned tile.
  */
 import { browser } from '$app/environment';
-import {
-	DIRS,
-	expToTile,
-	hasWon,
-	initBoard,
-	isDone,
-	maxExp,
-	move,
-	planMove,
-	spawnCell,
-	type Board,
-	type Dir
-} from './engine/board';
+import { DIRS, Engine, expToTile, type Board, type Dir } from './engine/board';
 import type { AiAPI, DepthCfg } from './ai/client';
 
 export type Status = 'playing' | 'over';
 
+/** Selectable board shapes (min dimension ≥ 4 plays best; 3×N is intentionally hard). */
+export const SHAPES = [
+	{ H: 4, W: 4, label: '4×4' },
+	{ H: 5, W: 5, label: '5×5' },
+	{ H: 4, W: 5, label: '4×5' },
+	{ H: 5, W: 4, label: '5×4' },
+	{ H: 6, W: 6, label: '6×6' },
+	{ H: 3, W: 4, label: '3×4' }
+] as const;
+
 /** A rendered tile with a stable identity that persists across moves (for animation). */
 export interface Sprite {
-	id: number; // stable across moves → the DOM element persists and its transform transitions
-	exp: number; // current exponent (value shown)
-	index: number; // board cell 0..15 (row*4 + col)
-	pop: number; // nonce; bumping it replays the pop animation (via {#key})
+	id: number;
+	exp: number;
+	index: number; // board cell (row*W + col)
+	pop: number;
 	popKind: 'spawn' | 'merge' | null;
 }
 
@@ -43,25 +40,33 @@ export const STRENGTHS = [
 	{ level: 3, label: 'Max', hint: 'depth 3, adaptive' }
 ] as const;
 
+// Adaptive rules by empty-cell *ratio* (works for any board size).
 const ADAPTIVE: [number, number][] = [
-	[3, 5],
-	[7, 3],
-	[16, 2]
+	[0.15, 4],
+	[0.35, 3]
 ];
 
 export function depthCfgFor(level: number): DepthCfg {
 	if (level <= 1) return { depth: 1 };
 	if (level === 2) return { depth: 2 };
-	return { depth: 3, adaptive: ADAPTIVE };
+	return { depth: 3, adaptive: ADAPTIVE, elseDepth: 2, maxChanceCells: 8 };
 }
 
-/** Baseline slide duration (ms) for manual play; clamped tighter during fast auto-play. */
 const SLIDE_MS = 100;
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Auto-play delay bounds (ms per move). The UI slider shows *speed*, so it maps
+ *  right→fast by mirroring across this range (see Controls.svelte). */
+export const DELAY_MIN = 20;
+export const DELAY_MAX = 600;
+export const DEFAULT_SPEED_MS = 140;
+
 export class Game {
-	board = $state<Board>(initBoard());
+	H = $state(4);
+	W = $state(4);
+	engine = new Engine(4, 4);
+
+	board = $state<Board>(new Engine(4, 4).initBoard());
 	sprites = $state<Sprite[]>([]);
 	score = $state(0);
 	best = $state(0);
@@ -70,15 +75,14 @@ export class Game {
 	won = $state(false);
 
 	aiReady = $state(false);
-	progress = $state(0); // weight-download progress 0..1
+	progress = $state(0);
 	thinking = $state(false);
 
 	auto = $state(false);
 	level = $state(2);
-	speedMs = $state(140);
+	speedMs = $state(DEFAULT_SPEED_MS);
 	hintDir = $state<Dir | null>(null);
 
-	/** Fired once when a game first reaches 2048. Set by the page for a toast. */
 	onWin: (() => void) | null = null;
 
 	private ai: AiAPI | null = null;
@@ -87,32 +91,27 @@ export class Game {
 	private pendingTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingFinalize: (() => void) | null = null;
 
-	maxTile = $derived(expToTile(maxExp(this.board)));
-
-	/** Slide long enough to read, but never longer than an auto-play tick. */
+	maxTile = $derived(expToTile(this.engine.maxExp(this.board)));
 	slideMs = $derived(this.auto ? Math.min(SLIDE_MS, Math.max(45, this.speedMs)) : SLIDE_MS);
 
 	constructor() {
+		this.board = this.engine.initBoard();
 		this.resetSprites();
 	}
 
-	/** Rebuild the sprite list from `board`, one popping tile per occupied cell. */
 	private resetSprites(): void {
 		const arr: Sprite[] = [];
-		for (let i = 0; i < 16; i++) {
+		for (let i = 0; i < this.engine.nCells; i++) {
 			if (this.board[i] !== 0)
 				arr.push({ id: this.nextId++, exp: this.board[i], index: i, pop: ++this.popSeq, popKind: 'spawn' });
 		}
 		this.sprites = arr;
 	}
 
-	/** Browser-only: spin up the AI worker and stream weight-load progress. */
 	async boot(): Promise<void> {
 		if (!browser || this.ai) return;
 		const { createAi } = await import('./ai/client');
 		this.ai = createAi();
-		// Resolve the model URL on the main thread (base-path aware) — the worker
-		// can't, since its own chunk path skews a relative BASE_URL.
 		const modelBase = new URL('model/', document.baseURI).href;
 		await this.ai.init(modelBase, (p) => {
 			this.progress = p;
@@ -120,10 +119,24 @@ export class Game {
 		this.aiReady = true;
 	}
 
+	/** Switch board shape and start a fresh game on it. */
+	setShape(H: number, W: number): void {
+		if (H === this.H && W === this.W) {
+			this.newGame();
+			return;
+		}
+		this.stopAuto();
+		this.cancelPending();
+		this.H = H;
+		this.W = W;
+		this.engine = new Engine(H, W);
+		this.newGame();
+	}
+
 	newGame(): void {
 		this.stopAuto();
 		this.cancelPending();
-		this.board = initBoard();
+		this.board = this.engine.initBoard();
 		this.score = 0;
 		this.moves = 0;
 		this.won = false;
@@ -132,46 +145,42 @@ export class Game {
 		this.resetSprites();
 	}
 
-	/** Apply a direction (shared by human + AI). Returns whether the board moved. */
 	private applyDir(dir: Dir): boolean {
 		if (this.status !== 'playing') return false;
-		this.flushPending(); // settle the previous move's sprites before starting a new slide
+		this.flushPending();
 
-		const plan = planMove(this.board, dir);
+		const plan = this.engine.planMove(this.board, dir);
 		if (!plan.changed) return false;
 
-		// Phase 1 — slide every existing sprite to its destination cell.
 		const byCell = new Map<number, Sprite>();
 		for (const s of this.sprites) byCell.set(s.index, s);
 		const toCount = new Map<number, number>();
 		for (const sl of plan.slides) {
 			const s = byCell.get(sl.from);
-			if (s) s.index = sl.to; // reactive → CSS `transform` transition slides the tile
+			if (s) s.index = sl.to;
 			toCount.set(sl.to, (toCount.get(sl.to) ?? 0) + 1);
 		}
 		const mergedCells = new Set<number>();
 		for (const [cell, n] of toCount) if (n >= 2) mergedCells.add(cell);
 
-		// Commit game state now (logic must not wait on the animation).
 		const after = plan.after;
-		const spawned = spawnCell(after);
+		const spawned = this.engine.spawnCell(after);
 		this.board = after;
 		this.score += plan.reward;
 		if (this.score > this.best) this.best = this.score;
 		this.moves++;
 		this.hintDir = null;
-		if (!this.won && hasWon(after)) {
+		if (!this.won && this.engine.hasWon(after)) {
 			this.won = true;
 			this.onWin?.();
 		}
-		if (isDone(after)) this.status = 'over';
+		if (this.engine.isDone(after)) this.status = 'over';
 
-		// Phase 2 (deferred) — drop absorbed ghosts, pop merged tiles + the spawn.
 		this.pendingFinalize = () => {
 			const seen = new Set<number>();
 			const kept: Sprite[] = [];
 			for (const s of this.sprites) {
-				if (seen.has(s.index)) continue; // second tile of a merge — absorbed
+				if (seen.has(s.index)) continue;
 				seen.add(s.index);
 				kept.push(s);
 			}
@@ -179,7 +188,7 @@ export class Game {
 				s.exp = this.board[s.index];
 				if (mergedCells.has(s.index)) {
 					s.popKind = 'merge';
-					s.pop = ++this.popSeq; // new value + replay the merge pop
+					s.pop = ++this.popSeq;
 				}
 			}
 			if (spawned >= 0) {
@@ -199,7 +208,6 @@ export class Game {
 		return true;
 	}
 
-	/** Run any deferred finalize immediately (before the next move / on demand). */
 	private flushPending(): void {
 		if (this.pendingTimer) {
 			clearTimeout(this.pendingTimer);
@@ -212,7 +220,6 @@ export class Game {
 		}
 	}
 
-	/** Drop a deferred finalize without running it (sprites are being rebuilt). */
 	private cancelPending(): void {
 		if (this.pendingTimer) {
 			clearTimeout(this.pendingTimer);
@@ -222,16 +229,20 @@ export class Game {
 	}
 
 	humanMove(dir: Dir): void {
-		if (this.auto) return; // ignore manual moves while auto-playing
+		if (this.auto) return;
 		this.applyDir(dir);
 	}
 
-	/** One AI move. Returns whether it moved. */
 	async aiStep(): Promise<boolean> {
 		if (!this.ai || !this.aiReady || this.status !== 'playing') return false;
 		this.thinking = true;
 		try {
-			const { dir } = await this.ai.bestMove(Array.from(this.board), depthCfgFor(this.level));
+			const { dir } = await this.ai.bestMove(
+				Array.from(this.board),
+				this.H,
+				this.W,
+				depthCfgFor(this.level)
+			);
 			if (!dir) {
 				this.status = 'over';
 				return false;
@@ -268,15 +279,19 @@ export class Game {
 		if (!this.ai || !this.aiReady || this.status !== 'playing') return;
 		this.thinking = true;
 		try {
-			const { dir } = await this.ai.bestMove(Array.from(this.board), depthCfgFor(this.level));
+			const { dir } = await this.ai.bestMove(
+				Array.from(this.board),
+				this.H,
+				this.W,
+				depthCfgFor(this.level)
+			);
 			this.hintDir = dir;
 		} finally {
 			this.thinking = false;
 		}
 	}
 
-	/** True if at least one legal move remains (used defensively). */
 	get hasMoves(): boolean {
-		return DIRS.some((d) => move(this.board, d).changed);
+		return DIRS.some((d) => this.engine.move(this.board, d).changed);
 	}
 }
