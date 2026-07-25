@@ -1,0 +1,34 @@
+{
+  "name": "2048ai-tui",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "description": "2048 in the terminal, authored in Solid, with the trained n-tuple + expectimax AI",
+  "scripts": {
+    "dev": "vite-node src/main.tsx",
+    "test": "vitest run",
+    "check-types": "tsc --noEmit",
+    "snapshot": "vite-node scripts/snapshot.tsx"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "tests",
+    "model",
+    "README.md",
+    "tsconfig.json",
+    "vite.config.ts"
+  ],
+  "dependencies": {
+    "@uniview/tui-core": "0.0.1",
+    "@uniview/tui-solid": "0.0.2",
+    "solid-js": "^1.9.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.0",
+    "vite-node": "^2.1.9",
+    "vitest": "^2.0.0"
+  }
+}
