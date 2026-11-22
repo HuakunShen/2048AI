@@ -13,3 +13,6 @@ scratch_logs/
 
 # Node / pnpm (web surfaces)
 node_modules/
+
+# Build output of the frame page: the Kunkun extension stages it, nothing commits it.
+plugin/dist/
