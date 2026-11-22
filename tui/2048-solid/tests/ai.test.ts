@@ -46,7 +46,16 @@ describe("model loader", () => {
 });
 
 withModel("n-tuple value function — golden parity vs the Python reference", () => {
-  it("reproduces V(board) for every golden board, across all six grid shapes", () => {
+  /**
+   * `model.pack` stores int16 values times a per-table scale (0.75 … 3.02), so
+   * one lookup is off by at most scale/2 and V() by at most their sum (~3.9).
+   * The golden records the float32 reference, so compare within that bound
+   * rather than for equality; the relative error stays around 1e-5, far below
+   * the gaps between candidate moves.
+   */
+  const QUANTISATION_BOUND = 4;
+
+  it("tracks V(board) for every golden board, across all six grid shapes", () => {
     const value = model!;
     const golden = readValueGolden();
     expect(golden.length).toBeGreaterThan(0);
@@ -55,15 +64,14 @@ withModel("n-tuple value function — golden parity vs the Python reference", ()
     for (const [i, rec] of golden.entries()) {
       const [H, W] = rec.shape;
       const got = value.value(tilesToBoard(rec.tiles), H, W);
-      maxDiff = Math.max(maxDiff, Math.abs(got - rec.value));
-      // float32 LUTs summed over 5 patterns × 8 symmetries — compare with a
-      // tolerance rather than exact equality.
-      expect(got, `golden ${i} (${H}x${W})`).toBeCloseTo(rec.value, 3);
+      const diff = Math.abs(got - rec.value);
+      maxDiff = Math.max(maxDiff, diff);
+      expect(diff, `golden ${i} (${H}x${W})`).toBeLessThanOrEqual(QUANTISATION_BOUND);
     }
     // One model really does serve every shape — that is the variable-grid claim.
     const shapes = new Set(golden.map((r) => r.shape.join("x")));
     expect(shapes.size).toBeGreaterThanOrEqual(4);
-    expect(maxDiff).toBeLessThan(1e-3);
+    expect(maxDiff).toBeLessThan(QUANTISATION_BOUND);
   });
 });
 

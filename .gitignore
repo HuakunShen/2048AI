@@ -10,3 +10,6 @@ models/
 runs/
 scratch_logs/
 .venv
+
+# Node / pnpm (web surfaces)
+node_modules/

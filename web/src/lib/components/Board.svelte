@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-svelte';
-	import type { Dir } from '$lib/engine/board';
+	import type { Dir } from '@2048/core';
 	import type { Sprite } from '$lib/game.svelte';
 	import Tile from './Tile.svelte';
 

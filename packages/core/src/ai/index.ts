@@ -1,0 +1,11 @@
+export { Expectimax } from "./expectimax";
+export type { DepthCfg, ShapeValueFn } from "./expectimax";
+export { UniversalValue } from "./universal";
+export { compilePattern, coreLibrary, orientCells } from "./patterns";
+export type { CompiledPattern, Pattern } from "./patterns";
+export { buildValueFromPacked, patternsFromManifest } from "./model";
+export type { PackedManifest } from "./model";
+export { startAiWorker } from "./worker";
+export type { WorkerScope } from "./worker";
+export { AiUnavailableError, createWorkerAi } from "./client";
+export type { AiErrorCode, WorkerRequest, WorkerResponse } from "./protocol";

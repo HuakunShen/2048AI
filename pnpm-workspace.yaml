@@ -1,0 +1,15 @@
+# 2048AI is a Python project at the root and a pnpm workspace for its web surfaces.
+# The Python side (`pyproject.toml`, `uv.lock`, `src/`, `tests/`) is untouched by this file.
+packages:
+  - "packages/*"
+  - "web"
+  - "plugin"
+
+# Pre-approve build scripts for the packages the web app installs:
+# `workerd` downloads the platform binary, `esbuild` and `sharp` (via miniflare)
+# download/build native bindings. Without these, pnpm 11+ aborts the install
+# with ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: true

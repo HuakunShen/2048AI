@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { boardToTiles, DIRS, Engine, tilesToBoard, type Board, type Dir } from './board';
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { boardToTiles, DIRS, Engine, tilesToBoard, type Board, type Dir } from "../src/engine";
 
 const eng = new Engine(4, 4);
 
@@ -10,58 +10,58 @@ function fromTiles(rows: number[][]): Board {
 	return tilesToBoard(rows.flat());
 }
 
-describe('collapse / move semantics', () => {
-	it('slides and merges a row leftward', () => {
-		const { after, reward, changed } = eng.move(fromTiles([[2, 2, 4, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]), 'LEFT');
+describe("collapse / move semantics", () => {
+	it("slides and merges a row leftward", () => {
+		const { after, reward, changed } = eng.move(fromTiles([[2, 2, 4, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]), "LEFT");
 		expect(boardToTiles(after).slice(0, 4)).toEqual([4, 4, 0, 0]);
 		expect(reward).toBe(4);
 		expect(changed).toBe(true);
 	});
 
-	it('merges four equal tiles into two (no double-merge)', () => {
-		const { after, reward } = eng.move(fromTiles([[4, 4, 4, 4], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]), 'LEFT');
+	it("merges four equal tiles into two (no double-merge)", () => {
+		const { after, reward } = eng.move(fromTiles([[4, 4, 4, 4], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]), "LEFT");
 		expect(boardToTiles(after).slice(0, 4)).toEqual([8, 8, 0, 0]);
 		expect(reward).toBe(16);
 	});
 
-	it('collapses columns upward', () => {
-		const { after } = eng.move(fromTiles([[2, 0, 0, 0], [2, 0, 0, 0], [4, 0, 0, 0], [4, 0, 0, 0]]), 'UP');
+	it("collapses columns upward", () => {
+		const { after } = eng.move(fromTiles([[2, 0, 0, 0], [2, 0, 0, 0], [4, 0, 0, 0], [4, 0, 0, 0]]), "UP");
 		expect(boardToTiles(after).filter((_, i) => i % 4 === 0)).toEqual([4, 8, 0, 0]);
 	});
 
-	it('reports changed=false for a no-op move', () => {
-		const { changed, reward } = eng.move(fromTiles([[4, 2, 4, 2], [2, 4, 2, 4], [4, 2, 4, 2], [2, 4, 2, 4]]), 'LEFT');
+	it("reports changed=false for a no-op move", () => {
+		const { changed, reward } = eng.move(fromTiles([[4, 2, 4, 2], [2, 4, 2, 4], [4, 2, 4, 2], [2, 4, 2, 4]]), "LEFT");
 		expect(changed).toBe(false);
 		expect(reward).toBe(0);
 	});
 });
 
-describe('board lifecycle', () => {
-	it('initBoard places exactly two tile-2s', () => {
+describe("board lifecycle", () => {
+	it("initBoard places exactly two tile-2s", () => {
 		const b = eng.initBoard(() => 0.5);
 		const tiles = boardToTiles(b);
 		expect(tiles.filter((t) => t === 2)).toHaveLength(2);
 		expect(tiles.filter((t) => t === 0)).toHaveLength(14);
 	});
 
-	it('spawn fills exactly one empty cell with 2 or 4', () => {
+	it("spawn fills exactly one empty cell with 2 or 4", () => {
 		const b = fromTiles([[2, 4, 8, 16], [32, 64, 128, 256], [512, 1024, 2048, 4096], [2, 4, 8, 0]]);
 		const ok = eng.spawn(b, () => 0.99); // >= 0.1 → tile 2
 		expect(ok).toBe(true);
 		expect(boardToTiles(b)[15]).toBe(2);
 	});
 
-	it('isDone is true only for a full board with no merges', () => {
+	it("isDone is true only for a full board with no merges", () => {
 		expect(eng.isDone(fromTiles([[2, 4, 2, 4], [4, 2, 4, 2], [2, 4, 2, 4], [4, 2, 4, 2]]))).toBe(true);
 		expect(eng.isDone(fromTiles([[2, 4, 2, 4], [4, 2, 4, 2], [2, 4, 2, 4], [4, 2, 4, 0]]))).toBe(false);
 		expect(eng.isDone(fromTiles([[2, 2, 2, 4], [4, 2, 4, 2], [2, 4, 2, 4], [4, 2, 4, 8]]))).toBe(false);
 	});
 
-	it('supports non-square shapes (3x5): full-height column merges', () => {
+	it("supports non-square shapes (3x5): full-height column merges", () => {
 		const e = new Engine(3, 5);
 		// column 0 has 2,2,4 -> UP merges the two 2s -> 4,4,0
 		const t = [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 4, 0, 0, 0, 0];
-		const { after, reward } = e.move(tilesToBoard(t), 'UP');
+		const { after, reward } = e.move(tilesToBoard(t), "UP");
 		expect(boardToTiles(after).filter((_, i) => i % 5 === 0)).toEqual([4, 4, 0]);
 		expect(reward).toBe(4);
 	});
@@ -73,12 +73,12 @@ interface GoldenBoard {
 	moves: Record<Dir, { after: number[]; reward: number; changed: boolean }>;
 }
 const golden = JSON.parse(
-	readFileSync(fileURLToPath(new URL('./__fixtures__/golden.json', import.meta.url)), 'utf8')
+	readFileSync(fileURLToPath(new URL("./fixtures/engine-golden.json", import.meta.url)), "utf8")
 ) as { boards: GoldenBoard[] };
 
-describe('planMove slide paths', () => {
+describe("planMove slide paths", () => {
 	/** Rebuild the afterstate purely from the slide list (merges = a cell hit twice). */
-	function reconstruct(slides: ReturnType<typeof eng.planMove>['slides']): number[] {
+	function reconstruct(slides: ReturnType<typeof eng.planMove>["slides"]): number[] {
 		const b = new Array<number>(16).fill(0);
 		const hit = new Set<number>();
 		for (const s of slides) {
@@ -88,7 +88,7 @@ describe('planMove slide paths', () => {
 		return b;
 	}
 
-	it('matches move() and its slides reconstruct the afterstate (golden boards)', () => {
+	it("matches move() and its slides reconstruct the afterstate (golden boards)", () => {
 		for (const rec of golden.boards) {
 			const b = tilesToBoard(rec.tiles);
 			for (const d of DIRS) {
@@ -108,8 +108,8 @@ describe('planMove slide paths', () => {
 	});
 });
 
-describe('golden engine parity vs NumpyStaticBoard', () => {
-	it('reproduces afterstate, reward and changed for every recorded board/direction', () => {
+describe("golden engine parity vs NumpyStaticBoard", () => {
+	it("reproduces afterstate, reward and changed for every recorded board/direction", () => {
 		let checks = 0;
 		for (const rec of golden.boards) {
 			const b = tilesToBoard(rec.tiles);

@@ -7,7 +7,7 @@
 	import Board from '$lib/components/Board.svelte';
 	import Controls from '$lib/components/Controls.svelte';
 	import { Game, SHAPES } from '$lib/game.svelte';
-	import type { Dir } from '$lib/engine/board';
+	import type { Dir } from '@2048/core';
 
 	const game = new Game();
 	game.onWin = () =>

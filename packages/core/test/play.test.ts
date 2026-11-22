@@ -1,30 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { buildValue, type Manifest } from './model';
-import { Expectimax, type DepthCfg } from './expectimax';
-import { Engine, expToTile, type Board } from '../engine/board';
-import type { UniversalValue } from './universal';
+import { describe, expect, it } from "vitest";
+import { Expectimax, type DepthCfg } from "../src/ai/expectimax";
+import type { UniversalValue } from "../src/ai/universal";
+import { Engine, expToTile, type Board } from "../src/engine";
+import { loadValue } from "./load-model";
 
 /**
  * Full-stack AI integration: runs the exact `Engine` + `UniversalValue` +
- * `Expectimax` code the Web Worker uses (in Node) to play complete games on
- * several board shapes with one model — proving the variable-grid browser AI
- * actually plays, not just that V() matches.
+ * `Expectimax` code the Worker uses, in Node, to play complete games on several
+ * board shapes with one model — proving the variable-grid AI actually plays, not
+ * just that V() matches.
  */
-const dir = fileURLToPath(new URL('../../../static/model/', import.meta.url));
-
-function loadValue(): UniversalValue {
-	const manifest = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8')) as Manifest;
-	const buffers = manifest.patterns.map((_, k) =>
-		manifest.parts[k].map((_p, p) => {
-			const raw = readFileSync(dir + `lut${k}_${p}.bin`);
-			return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-		})
-	);
-	return buildValue(manifest, buffers);
-}
-
 function playGame(eng: Engine, value: UniversalValue, cfg: DepthCfg) {
 	const ai = new Expectimax(eng, (b: Board) => value.value(b, eng.H, eng.W));
 	let board = eng.initBoard();
@@ -41,11 +26,11 @@ function playGame(eng: Engine, value: UniversalValue, cfg: DepthCfg) {
 	return { maxTile: expToTile(eng.maxExp(board)), moves };
 }
 
-describe('variable-grid AI integration — one model plays multiple shapes', () => {
+describe("variable-grid AI integration — one model plays multiple shapes", () => {
 	const value = loadValue();
 	const cfg: DepthCfg = { depth: 2 };
 
-	it('reaches 2048 on 4x4 (depth-2)', () => {
+	it("reaches 2048 on 4x4 (depth-2)", () => {
 		const eng = new Engine(4, 4);
 		let best = 0;
 		const log: string[] = [];
@@ -54,11 +39,11 @@ describe('variable-grid AI integration — one model plays multiple shapes', () 
 			log.push(`tile=${maxTile} moves=${moves}`);
 			best = Math.max(best, maxTile);
 		}
-		console.log('[4x4 depth-2]', log.join(' | '));
-		expect(best, log.join(', ')).toBeGreaterThanOrEqual(2048);
+		console.log("[4x4 depth-2]", log.join(" | "));
+		expect(best, log.join(", ")).toBeGreaterThanOrEqual(2048);
 	}, 120_000);
 
-	it('plays a full 5x5 game and reaches a high tile', () => {
+	it("plays a full 5x5 game and reaches a high tile", () => {
 		const eng = new Engine(5, 5);
 		const { maxTile, moves } = playGame(eng, value, cfg);
 		console.log(`[5x5 depth-2] tile=${maxTile} moves=${moves}`);
@@ -66,7 +51,7 @@ describe('variable-grid AI integration — one model plays multiple shapes', () 
 		expect(maxTile).toBeGreaterThanOrEqual(2048);
 	}, 120_000);
 
-	it('plays a non-square 3x4 game to completion', () => {
+	it("plays a non-square 3x4 game to completion", () => {
 		const eng = new Engine(3, 4);
 		const { maxTile, moves } = playGame(eng, value, cfg);
 		console.log(`[3x4 depth-2] tile=${maxTile} moves=${moves}`);

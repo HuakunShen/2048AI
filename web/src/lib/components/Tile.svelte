@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { expToTile } from '$lib/engine/board';
+	import { expToTile } from '@2048/core';
 	import { tileBg, tileFg, tileFontClass } from '$lib/theme';
 	import type { Sprite } from '$lib/game.svelte';
 

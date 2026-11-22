@@ -1,0 +1,18 @@
+{
+  "name": "@2048/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The variable-grid 2048 engine and the trained universal n-tuple + expectimax agent, framework-free.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./engine": "./src/engine.ts",
+    "./ai": "./src/ai/index.ts",
+    "./game": "./src/game/controller.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

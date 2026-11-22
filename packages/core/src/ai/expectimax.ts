@@ -6,7 +6,7 @@
  * Works on any board shape via an {@link Engine}; adaptive depth uses the empty
  * **ratio** so large boards search shallow when open and deeper in the endgame.
  */
-import { DIRS, type Board, type Dir, Engine } from '../engine/board';
+import { DIRS, type Board, type Dir, Engine } from '../engine';
 
 /** Spawned tile as exponent + probability: 2 (exp 1) w.p. .9, 4 (exp 2) w.p. .1. */
 const SPAWN_TILES: readonly [number, number][] = [

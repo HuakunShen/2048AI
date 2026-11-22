@@ -18,7 +18,7 @@ import { UniversalValue } from "../vendor/universal";
  * into dense Float32Arrays. The packed form uses delta-varint indices and
  * int16 values, reducing the distribution from roughly 84 MB to one file.
  */
-export const DEFAULT_MODEL_DIR = fileURLToPath(new URL("../../model/", import.meta.url));
+export const DEFAULT_MODEL_DIR = fileURLToPath(new URL("../../../../assets/", import.meta.url));
 const PACKED_MODEL = "model.pack";
 
 /** Where the weights live: `$UNIVIEW_2048_MODEL_DIR`, else `<package>/model/`. */
