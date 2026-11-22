@@ -40,7 +40,7 @@ async function launchOptions() {
 	return {};
 }
 
-const dist = fileURLToPath(new URL("../../plugin/dist/", import.meta.url));
+const dist = process.env["SMOKE_DIST"] ?? fileURLToPath(new URL("../../plugin/dist/", import.meta.url));
 const served = [];
 
 const MIME = {
