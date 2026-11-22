@@ -26,7 +26,19 @@ interface Pending {
 	onProgress?: (fraction: number) => void;
 }
 
-export function createWorkerAi(worker: Worker): AiProvider & { dispose(): void } {
+export interface WorkerAiOptions {
+	/** Budget for the model fetch and decode. Default 180 s. */
+	readonly initTimeoutMs?: number;
+	/** Budget for one search. Default 60 s. */
+	readonly moveTimeoutMs?: number;
+}
+
+export function createWorkerAi(
+	worker: Worker,
+	options: WorkerAiOptions = {}
+): AiProvider & { dispose(): void } {
+	const initTimeoutMs = options.initTimeoutMs ?? 180_000;
+	const moveTimeoutMs = options.moveTimeoutMs ?? 60_000;
 	let nextId = 1;
 	const pending = new Map<number, Pending>();
 
@@ -94,10 +106,10 @@ export function createWorkerAi(worker: Worker): AiProvider & { dispose(): void }
 	return {
 		async init(modelUrl, onProgress) {
 			// The 33 MB fetch and the decode of ~33.7 M entries happen inside this budget.
-			await send({ id: nextId++, kind: "init", modelUrl }, 180_000, onProgress);
+			await send({ id: nextId++, kind: "init", modelUrl }, initTimeoutMs, onProgress);
 		},
 		async bestMove(board: number[], H: number, W: number, cfg: DepthCfg): Promise<AiMove> {
-			const result = await send({ id: nextId++, kind: "move", board, H, W, cfg }, 60_000);
+			const result = await send({ id: nextId++, kind: "move", board, H, W, cfg }, moveTimeoutMs);
 			return result ?? { dir: null as Dir | null, value: 0 };
 		},
 		dispose() {
