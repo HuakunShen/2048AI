@@ -167,6 +167,7 @@ export class GameController {
 	private listeners = new Set<(snapshot: GameSnapshot) => void>();
 	private snapshot: GameSnapshot | null = null;
 	private autoCancel: (() => void) | null = null;
+	private autoResolve: (() => void) | null = null;
 
 	constructor(options: GameOptions = {}) {
 		const stored = options.H === undefined || options.W === undefined ? readShape(options.storage ?? memoryStorage()) : null;
@@ -358,6 +359,15 @@ export class GameController {
 		await this.load();
 	}
 
+	/** Drop a failed AI and try again; the human game keeps working either way. */
+	async retry(): Promise<void> {
+		this.ai = null;
+		this.aiReady = false;
+		this.aiError = null;
+		this.progress = 0;
+		this.emit();
+	}
+
 	/** Re-run the model load on an already-attached provider. */
 	async load(): Promise<void> {
 		if (this.ai === null || this.aiReady || this.modelUrl === null) return;
@@ -416,6 +426,9 @@ export class GameController {
 	private stopAuto(): void {
 		this.autoCancel?.();
 		this.autoCancel = null;
+		// Wake the loop: cancelling the timer alone would leave its await pending forever.
+		this.autoResolve?.();
+		this.autoResolve = null;
 		if (!this.auto) return;
 		this.auto = false;
 		this.emit();
@@ -426,8 +439,10 @@ export class GameController {
 			const moved = await this.aiStep();
 			if (!moved) break;
 			await new Promise<void>((resolve) => {
+				this.autoResolve = resolve;
 				this.autoCancel = this.scheduler.after(this.speedMs, () => {
 					this.autoCancel = null;
+					this.autoResolve = null;
 					resolve();
 				});
 			});

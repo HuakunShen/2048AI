@@ -14,7 +14,8 @@
 		onStep,
 		onHint,
 		onLevel,
-		onSpeed
+		onSpeed,
+		onRetry
 	}: {
 		snapshot: GameSnapshot;
 		onNew: () => void;
@@ -23,6 +24,7 @@
 		onHint: () => void;
 		onLevel: (level: number) => void;
 		onSpeed: (speedMs: number) => void;
+		onRetry: () => void;
 	} = $props();
 
 	const playable = $derived(snapshot.aiReady && snapshot.status === "playing");
@@ -44,9 +46,12 @@
 			<div class="progress"><div class="progress-fill" style="width: {snapshot.progress * 100}%"></div></div>
 		</div>
 	{:else if snapshot.aiError !== null}
-		<p class="muted small ai-error" title={snapshot.aiError}>
-			AI unavailable — play with the arrow keys. {snapshot.aiError}
-		</p>
+		<div class="ai-error-row">
+			<p class="muted small ai-error" title={snapshot.aiError}>
+				AI unavailable — play with the arrow keys. {snapshot.aiError}
+			</p>
+			<button class="btn outline retry" type="button" onclick={onRetry}>Retry</button>
+		</div>
 	{/if}
 
 	<div class="grid-4">
@@ -194,8 +199,17 @@
 		width: 100%;
 		accent-color: var(--primary, CanvasText);
 	}
+	.ai-error-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
 	.ai-error {
 		margin: 0;
+		flex: 1 1 auto;
 		overflow-wrap: anywhere;
+	}
+	.retry {
+		flex: 0 0 auto;
 	}
 </style>

@@ -54,7 +54,7 @@
 	/>
 </svelte:head>
 
-<main class="mx-auto flex min-h-svh max-w-md flex-col gap-5 px-4 py-6">
+<main class="mx-auto flex h-svh max-w-md flex-col gap-4 overflow-hidden px-4 py-5">
 	<header class="flex items-center justify-between">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">2048 <span class="text-primary">AI</span></h1>
@@ -66,7 +66,7 @@
 		</Button>
 	</header>
 
-	<game-2048 bind:this={element} onscore={onScore} ongameover={onNewGame}></game-2048>
+	<game-2048 class="min-h-0 flex-1" bind:this={element} onscore={onScore} ongameover={onNewGame}></game-2048>
 
 	<footer class="mt-auto text-center text-[11px] text-muted-foreground">
 		One engine, one AI, any board size — shared with the Kunkun plugin.

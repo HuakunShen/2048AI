@@ -8,7 +8,7 @@
 import type { Dir } from "../engine";
 import type { DepthCfg } from "./expectimax";
 
-export type AiErrorCode = "MODEL_MISSING" | "MODEL_CORRUPT" | "NOT_READY";
+export type AiErrorCode = "MODEL_MISSING" | "MODEL_CORRUPT" | "NOT_READY" | "TIMEOUT";
 
 export type WorkerRequest =
 	| { id: number; kind: "init"; modelUrl: string }

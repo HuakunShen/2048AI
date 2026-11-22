@@ -124,11 +124,21 @@ export function startAiWorker(scope: WorkerScope, options: WorkerOptions = {}): 
 				return;
 			}
 
-			const { dir, value: score } = searcherFor(request.H, request.W).getMove(
-				Uint8Array.from(request.board) as Board,
-				request.cfg
-			);
-			scope.postMessage({ id: request.id, kind: "move", dir, value: score });
+			try {
+				const { dir, value: score } = searcherFor(request.H, request.W).getMove(
+					Uint8Array.from(request.board) as Board,
+					request.cfg
+				);
+				scope.postMessage({ id: request.id, kind: "move", dir, value: score });
+			} catch (cause) {
+				// A search that throws must answer, or the caller waits forever.
+				scope.postMessage({
+					id: request.id,
+					kind: "error",
+					code: "NOT_READY",
+					message: `search failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+				});
+			}
 		})();
 	};
 }

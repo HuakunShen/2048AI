@@ -30,6 +30,19 @@ export function createWorkerAi(worker: Worker): AiProvider & { dispose(): void }
 	let nextId = 1;
 	const pending = new Map<number, Pending>();
 
+	/** Reject everything in flight: a dead worker must not leave a promise hanging. */
+	const failAll = (code: AiErrorCode, message: string): void => {
+		for (const entry of pending.values()) entry.reject(new AiUnavailableError(code, message));
+		pending.clear();
+	};
+
+	worker.addEventListener("error", (event) => {
+		failAll("NOT_READY", `the AI worker failed: ${String((event as ErrorEvent).message ?? "unknown error")}`);
+	});
+	worker.addEventListener("messageerror", () => {
+		failAll("NOT_READY", "the AI worker sent a message that could not be decoded");
+	});
+
 	worker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
 		const message = event.data;
 		const entry = pending.get(message.id);
@@ -53,18 +66,38 @@ export function createWorkerAi(worker: Worker): AiProvider & { dispose(): void }
 		}
 	});
 
-	const send = (request: WorkerRequest, onProgress?: (fraction: number) => void): Promise<AiMove | void> =>
+	const send = (
+		request: WorkerRequest,
+		timeoutMs: number,
+		onProgress?: (fraction: number) => void
+	): Promise<AiMove | void> =>
 		new Promise((resolve, reject) => {
-			pending.set(request.id, { resolve, reject, ...(onProgress === undefined ? {} : { onProgress }) });
+			const timer = setTimeout(() => {
+				if (!pending.delete(request.id)) return;
+				reject(new AiUnavailableError("TIMEOUT", `the AI worker did not answer within ${String(timeoutMs)} ms`));
+			}, timeoutMs);
+			const settle = {
+				resolve: (value: AiMove | void) => {
+					clearTimeout(timer);
+					resolve(value);
+				},
+				reject: (reason: unknown) => {
+					clearTimeout(timer);
+					reject(reason);
+				},
+				...(onProgress === undefined ? {} : { onProgress }),
+			};
+			pending.set(request.id, settle);
 			worker.postMessage(request);
 		});
 
 	return {
 		async init(modelUrl, onProgress) {
-			await send({ id: nextId++, kind: "init", modelUrl }, onProgress);
+			// The 33 MB fetch and the decode of ~33.7 M entries happen inside this budget.
+			await send({ id: nextId++, kind: "init", modelUrl }, 180_000, onProgress);
 		},
 		async bestMove(board: number[], H: number, W: number, cfg: DepthCfg): Promise<AiMove> {
-			const result = await send({ id: nextId++, kind: "move", board, H, W, cfg });
+			const result = await send({ id: nextId++, kind: "move", board, H, W, cfg }, 60_000);
 			return result ?? { dir: null as Dir | null, value: 0 };
 		},
 		dispose() {

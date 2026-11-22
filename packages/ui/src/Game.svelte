@@ -118,12 +118,17 @@
 	export function setShape(H: number, W: number): void {
 		controller.setShape(H, W);
 	}
+	export function retryAi(): Promise<void> {
+		return controller.retry();
+	}
 
 	// ── props → controller ─────────────────────────────────────────────────────
 	$effect(() => controller.setLevel(depth));
 	$effect(() => controller.setSpeed(speed));
 	$effect(() => {
-		if (autoplay) controller.toggleAuto();
+		const snapshot = controller.getSnapshot();
+		if (autoplay && !snapshot.auto) controller.toggleAuto();
+		if (!autoplay && snapshot.auto) controller.toggleAuto();
 	});
 
 	// ── lifecycle ──────────────────────────────────────────────────────────────
@@ -213,6 +218,7 @@
 	const onHint = () => void controller.hint();
 	const onLevel = (level: number) => controller.setLevel(level);
 	const onSpeed = (speedMs: number) => controller.setSpeed(speedMs);
+	const onRetry = () => void controller.retry();
 </script>
 
 <div class="game">
@@ -268,7 +274,7 @@
 		{/if}
 	</div>
 
-	<Controls {snapshot} {onNew} {onToggleAuto} {onStep} {onHint} {onLevel} {onSpeed} />
+	<Controls {snapshot} {onNew} {onToggleAuto} {onStep} {onHint} {onLevel} {onSpeed} {onRetry} />
 
 	{#if snapshot.status === "over"}
 		<div class="over">
