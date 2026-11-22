@@ -162,3 +162,7 @@
 		animation: none;
 	}
 }
+
+game-2048 {
+	display: block;
+}

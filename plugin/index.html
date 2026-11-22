@@ -17,15 +17,36 @@
 				color: var(--foreground, CanvasText);
 				font-family: var(--font-sans, system-ui);
 			}
+			/* The frame is a window, not a document: it fills the height it is given
+			   and never scrolls. */
+			html,
+			body,
+			main {
+				height: 100%;
+			}
 			body {
 				margin: 0;
-				min-height: 100vh;
+				/* No scrollbar while the content fits the window (the declared
+				   480x720 does); a very short window scrolls rather than squeezing
+				   the board into a non-square shape. */
+				overflow: auto;
 			}
 			main {
 				box-sizing: border-box;
 				max-width: 34rem;
 				margin: 0 auto;
-				padding: 1rem;
+				padding: 0.75rem;
+				display: flex;
+				flex-direction: column;
+				min-height: 0;
+			}
+			game-2048 {
+				/* `flex-basis: 0`: the element must not be sized by the board it
+				   contains, or measuring and resizing feed each other. */
+				flex: 1 1 0;
+				min-height: 0;
+				min-width: 0;
+				display: block;
 			}
 		</style>
 	</head>

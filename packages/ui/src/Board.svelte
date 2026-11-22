@@ -7,8 +7,27 @@
 		H = 4,
 		W = 4,
 		hint = null,
-		slideMs = 100
-	}: { sprites: Sprite[]; H?: number; W?: number; hint?: Dir | null; slideMs?: number } = $props();
+		slideMs = 100,
+		width = 0,
+		height = 0
+	}: {
+		sprites: Sprite[];
+		H?: number;
+		W?: number;
+		hint?: Dir | null;
+		slideMs?: number;
+		width?: number;
+		height?: number;
+	} = $props();
+
+	/**
+	 * The host measures the free space and passes box dimensions whose *cells* are
+	 * square: padding and gap are the same on both axes, so a W×H board is not a
+	 * scaled square. Until the first measurement, fall back to a width-driven box.
+	 */
+	const box = $derived(
+		width > 0 && height > 0 ? `width: ${width}px; height: ${height}px;` : 'width: 100%;'
+	);
 
 	const ARROW: Record<Dir, string> = { UP: "↑", DOWN: "↓", LEFT: "←", RIGHT: "→" };
 </script>
@@ -17,7 +36,7 @@
      --cols/--rows drive the generic tile sizing; aspect-ratio keeps cells square. -->
 <div
 	class="board"
-	style="--g: 0.5rem; --slide: {slideMs}ms; --cols: {W}; --rows: {H}; aspect-ratio: {W} / {H};"
+	style="--g: 0.5rem; --slide: {slideMs}ms; --cols: {W}; --rows: {H}; {box}"
 >
 	<!-- Static background: the H×W grid of empty cells. -->
 	<div
@@ -46,7 +65,8 @@
 <style>
 	.board {
 		position: relative;
-		width: 100%;
+		max-width: 100%;
+		aspect-ratio: var(--cols) / var(--rows);
 		user-select: none;
 		container-type: inline-size;
 	}

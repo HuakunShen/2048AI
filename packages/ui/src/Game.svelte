@@ -151,7 +151,17 @@
 		}
 
 		window.addEventListener("keydown", onKey);
+
+		const observer = new ResizeObserver((entries) => {
+			const rect = entries[0]?.contentRect;
+			if (rect === undefined) return;
+			freeWidth = rect.width;
+			freeHeight = rect.height;
+		});
+		if (boardArea !== undefined) observer.observe(boardArea);
+
 		return () => {
+			observer.disconnect();
 			window.removeEventListener("keydown", onKey);
 			unsubscribe();
 			controller.dispose();
@@ -172,6 +182,30 @@
 		if (Math.abs(dx) > Math.abs(dy)) controller.humanMove(dx > 0 ? "RIGHT" : "LEFT");
 		else controller.humanMove(dy > 0 ? "DOWN" : "UP");
 	}
+
+	// Measure the space the chrome leaves, then size the board from the largest
+	// square *cell* that fits. Padding and gap are equal on both axes, so scaling
+	// a W×H box would leave cells slightly rectangular.
+	let boardArea = $state<HTMLDivElement | undefined>(undefined);
+	let freeHeight = $state(0);
+	let freeWidth = $state(0);
+	const PAD = 8;
+	const GAP = 8;
+	const cell = $derived(
+		// Whole pixels: a fractional cell is rounded differently per axis by the
+		// grid, which is exactly the 0.4 px difference this avoids.
+		Math.floor(
+			Math.max(
+				0,
+				Math.min(
+					(freeWidth - 2 * PAD - (snapshot.W - 1) * GAP) / snapshot.W,
+					(freeHeight - 2 * PAD - (snapshot.H - 1) * GAP) / snapshot.H
+				)
+			)
+		)
+	);
+	const boardWidth = $derived(cell > 0 ? snapshot.W * cell + (snapshot.W - 1) * GAP + 2 * PAD : 0);
+	const boardHeight = $derived(cell > 0 ? snapshot.H * cell + (snapshot.H - 1) * GAP + 2 * PAD : 0);
 
 	const onNew = () => controller.newGame();
 	const onToggleAuto = () => controller.toggleAuto();
@@ -211,10 +245,19 @@
 		class="board-area"
 		role="application"
 		aria-label="2048 board"
+		bind:this={boardArea}
 		ontouchstart={onTouchStart}
 		ontouchend={onTouchEnd}
 	>
-		<Board sprites={snapshot.sprites} H={snapshot.H} W={snapshot.W} hint={snapshot.hintDir} slideMs={snapshot.slideMs} />
+		<Board
+			sprites={snapshot.sprites}
+			H={snapshot.H}
+			W={snapshot.W}
+			hint={snapshot.hintDir}
+			slideMs={snapshot.slideMs}
+			width={boardWidth}
+			height={boardHeight}
+		/>
 	</div>
 
 	<div class="status">
@@ -246,8 +289,10 @@
 	.game {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.5rem;
 		width: 100%;
+		height: 100%;
+		min-height: 0;
 		color: var(--foreground, CanvasText);
 		font-family: var(--font-sans, system-ui);
 		font-size: var(--font-size-base, 1rem);
@@ -272,8 +317,8 @@
 	.stat {
 		display: flex;
 		flex-direction: column;
-		gap: 0.125rem;
-		padding: 0.5rem 0.75rem;
+		gap: 0;
+		padding: 0.25rem 0.5rem;
 		border-radius: var(--radius, 6px);
 		background: var(--muted, rgb(127 127 127 / 0.15));
 	}
@@ -285,7 +330,7 @@
 		color: var(--muted-foreground, GrayText);
 	}
 	.stat-value {
-		font-size: 1.25rem;
+		font-size: 1rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
 	}
@@ -300,8 +345,8 @@
 		gap: 0.375rem;
 	}
 	.chip {
-		height: 2rem;
-		padding: 0 0.625rem;
+		height: 1.75rem;
+		padding: 0 0.5rem;
 		border-radius: var(--radius, 6px);
 		border: 1px solid var(--border, GrayText);
 		background: transparent;
@@ -316,6 +361,18 @@
 		color: var(--primary-foreground, Canvas);
 	}
 	.board-area {
+		/* The board takes whatever the chrome leaves. `flex-basis: 0` plus
+		   `overflow: hidden` keeps the box independent of the board it contains:
+		   otherwise measuring and resizing feed each other and the board spills
+		   over the controls. */
+		flex: 1 1 0;
+		/* A floor, so a very short window still shows a usable square board and
+		   the page scrolls instead of collapsing or distorting the cells. */
+		min-height: 10rem;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		touch-action: none;
 	}
 	.status {
@@ -352,7 +409,6 @@
 	}
 	.footer {
 		margin: 0;
-		padding-top: 0.5rem;
 		text-align: center;
 	}
 </style>
