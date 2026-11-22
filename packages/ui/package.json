@@ -1,0 +1,24 @@
+{
+  "name": "@2048/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The 2048 game as one <game-2048> custom element, shared by the web app and the Kunkun plugin.",
+  "license": "MIT",
+  "svelte": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@2048/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "svelte": "^5.56.1",
+    "svelte-check": "^4.6.0",
+    "typescript": "^5.9.3"
+  }
+}

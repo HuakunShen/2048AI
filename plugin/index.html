@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<!-- No favicon: an empty data URL stops the browser's /favicon.ico probe. -->
+		<link rel="icon" href="data:," />
+		<title>2048 AI</title>
+		<!--
+			The contract head from Kunkun's plugin theme guide: legible before any host
+			pushes variables. Kept inline and tiny so the first paint is already themed.
+		-->
+		<style>
+			:root {
+				background: var(--background, Canvas);
+				color: var(--foreground, CanvasText);
+				font-family: var(--font-sans, system-ui);
+			}
+			body {
+				margin: 0;
+				min-height: 100vh;
+			}
+			main {
+				box-sizing: border-box;
+				max-width: 34rem;
+				margin: 0 auto;
+				padding: 1rem;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<game-2048 id="game"></game-2048>
+		</main>
+		<script type="module" src="./src/main.ts"></script>
+	</body>
+</html>

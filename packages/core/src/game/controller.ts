@@ -95,6 +95,8 @@ export interface GameSnapshot {
 	slideMs: number;
 	aiReady: boolean;
 	progress: number;
+	/** Non-null when the model load failed; the human game still works. */
+	aiError: string | null;
 	thinking: boolean;
 	auto: boolean;
 	level: number;
@@ -155,6 +157,8 @@ export class GameController {
 	private readonly onWin: (() => void) | undefined;
 
 	private ai: AiProvider | null = null;
+	private modelUrl: string | null = null;
+	private aiError: string | null = null;
 	private nextId = 0;
 	private popSeq = 0;
 	private cancelFinalize: (() => void) | null = null;
@@ -201,6 +205,7 @@ export class GameController {
 			slideMs,
 			aiReady: this.aiReady,
 			progress: this.progress,
+			aiError: this.aiError,
 			thinking: this.thinking,
 			auto: this.auto,
 			level: this.level,
@@ -349,22 +354,27 @@ export class GameController {
 	async boot(provider: AiProvider, modelUrl: string): Promise<void> {
 		if (this.ai !== null) return;
 		this.ai = provider;
+		this.modelUrl = modelUrl;
 		await this.load();
 	}
 
 	/** Re-run the model load on an already-attached provider. */
 	async load(): Promise<void> {
-		if (this.ai === null || this.aiReady) return;
+		if (this.ai === null || this.aiReady || this.modelUrl === null) return;
+		this.aiError = null;
 		try {
-			await this.ai.init("ignored", (fraction) => {
+			await this.ai.init(this.modelUrl, (fraction) => {
 				this.progress = fraction;
 				this.emit();
 			});
 			this.aiReady = true;
-		} catch {
+			this.progress = 1;
+		} catch (error) {
+			// A missing or corrupt pack is not fatal: the human game keeps working.
 			this.aiReady = false;
+			this.progress = 0;
+			this.aiError = error instanceof Error ? error.message : String(error);
 		} finally {
-			this.progress = this.aiReady ? 1 : 0;
 			this.emit();
 		}
 	}

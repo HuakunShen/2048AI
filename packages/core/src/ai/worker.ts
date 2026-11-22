@@ -21,7 +21,18 @@ export interface WorkerScope {
 	postMessage(message: WorkerResponse): void;
 }
 
-export function startAiWorker(scope: WorkerScope): void {
+/**
+ * How the worker gets its tables.
+ *
+ * The default fetches one file and decodes it. A host that must split the model
+ * (Cloudflare Workers caps a single asset at 25 MiB, and the pack is 31.6 MiB)
+ * supplies its own: it receives the `modelUrl` from `init` and reports progress.
+ */
+export interface WorkerOptions {
+	fetchModel?: (modelUrl: string, report: (fraction: number) => void) => Promise<UniversalValue>;
+}
+
+export function startAiWorker(scope: WorkerScope, options: WorkerOptions = {}): void {
 	let value: UniversalValue | null = null;
 	let loading: Promise<UniversalValue> | null = null;
 	const searchers = new Map<string, Expectimax>();
@@ -37,7 +48,7 @@ export function startAiWorker(scope: WorkerScope): void {
 		return searcher;
 	};
 
-	const load = async (
+	const fetchSingle = async (
 		modelUrl: string,
 		report: (fraction: number) => void
 	): Promise<UniversalValue> => {
@@ -67,6 +78,8 @@ export function startAiWorker(scope: WorkerScope): void {
 		}
 	};
 
+	const fetchModel = options.fetchModel ?? fetchSingle;
+
 	const codeOf = (error: unknown): AiErrorCode => {
 		if (typeof error === "object" && error !== null && "code" in error) {
 			const code = (error as { code?: unknown }).code;
@@ -84,7 +97,7 @@ export function startAiWorker(scope: WorkerScope): void {
 					return;
 				}
 				try {
-					loading ??= load(request.modelUrl, (fraction) =>
+					loading ??= fetchModel(request.modelUrl, (fraction) =>
 						scope.postMessage({ id: request.id, kind: "progress", fraction })
 					);
 					value = await loading;

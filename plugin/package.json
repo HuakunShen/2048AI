@@ -1,0 +1,21 @@
+{
+  "name": "@2048/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The frame page Kunkun loads: <game-2048> plus the AI worker, with no host-specific code.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@2048/core": "workspace:*",
+    "@2048/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "svelte": "^5.56.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.16"
+  }
+}
