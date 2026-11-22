@@ -7,6 +7,7 @@
 		SHAPES,
 		webStorage,
 		type AiProvider,
+		type AiProviderFactory,
 		type Dir,
 		type GameSnapshot
 	} from "@2048/core";
@@ -88,7 +89,7 @@
 	}
 
 	// ── public API (exported functions become methods on the element) ──────────
-	export function attachAi(provider: AiProvider, modelUrl: string): Promise<void> {
+	export function attachAi(provider: AiProvider | AiProviderFactory, modelUrl: string): Promise<void> {
 		return controller.boot(provider, modelUrl);
 	}
 	export function newGame(): void {

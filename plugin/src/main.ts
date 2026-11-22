@@ -13,7 +13,8 @@ const element = document.getElementById("game");
 if (element === null) throw new Error("index.html has no #game element");
 
 const modelUrl = new URL("model.pack", document.baseURI).href;
-const worker = new Worker(new URL("./ai-worker.ts", import.meta.url), { type: "module" });
+/** A new Worker per attempt, so Retry after a dead Worker starts clean. */
+const makeAi = () => createWorkerAi(new Worker(new URL("./ai-worker.ts", import.meta.url), { type: "module" }));
 
 await customElements.whenDefined("game-2048");
 
@@ -22,7 +23,7 @@ const game = element as HTMLElement & {
 	newGame(): void;
 };
 
-void game.attachAi(createWorkerAi(worker), modelUrl);
+void game.attachAi(makeAi, modelUrl);
 
 declare global {
 	interface Window {

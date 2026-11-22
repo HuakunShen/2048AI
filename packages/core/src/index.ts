@@ -26,6 +26,7 @@ export {
 export type {
 	AiMove,
 	AiProvider,
+	AiProviderFactory,
 	GameOptions,
 	GameSnapshot,
 	Scheduler,

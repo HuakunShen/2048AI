@@ -28,20 +28,19 @@
 
 	onMount(() => {
 		let cancelled = false;
-		let dispose: (() => void) | undefined;
 
 		void (async () => {
 			await customElements.whenDefined('game-2048');
 			if (cancelled || element === undefined) return;
-			const worker = new Worker(new URL('../lib/ai-worker.ts', import.meta.url), { type: 'module' });
-			const ai = createWorkerAi(worker);
-			dispose = () => ai.dispose();
-			await element.attachAi(ai, new URL('model/parts.json', document.baseURI).href);
+			// The element owns the provider's lifetime (it disposes the current one on
+			// retry and on destroy), so the page only supplies a factory.
+			const makeAi = () =>
+				createWorkerAi(new Worker(new URL('../lib/ai-worker.ts', import.meta.url), { type: 'module' }));
+			await element.attachAi(makeAi, new URL('model/parts.json', document.baseURI).href);
 		})();
 
 		return () => {
 			cancelled = true;
-			dispose?.();
 		};
 	});
 </script>

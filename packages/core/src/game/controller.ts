@@ -79,7 +79,12 @@ export interface AiMove {
 export interface AiProvider {
 	init(modelUrl: string, onProgress: (fraction: number) => void): Promise<void>;
 	bestMove(board: number[], H: number, W: number, cfg: DepthCfg): Promise<AiMove>;
+	/** Releases the Worker and its tables; called when Retry replaces a failed provider. */
+	dispose?(): void;
 }
+
+/** Builds a provider; Retry calls it again so a dead Worker is replaced, not re-used. */
+export type AiProviderFactory = () => AiProvider;
 
 export interface GameSnapshot {
 	H: number;
@@ -157,6 +162,8 @@ export class GameController {
 	private readonly onWin: (() => void) | undefined;
 
 	private ai: AiProvider | null = null;
+	/** How to build a replacement provider (Retry); null when the host passed a bare instance. */
+	private aiFactory: AiProviderFactory | null = null;
 	private modelUrl: string | null = null;
 	private aiError: string | null = null;
 	private nextId = 0;
@@ -168,6 +175,8 @@ export class GameController {
 	private snapshot: GameSnapshot | null = null;
 	private autoCancel: (() => void) | null = null;
 	private autoResolve: (() => void) | null = null;
+	/** Bumped whenever a loop starts or stops, so only the current loop owns the auto state. */
+	private autoToken = 0;
 
 	constructor(options: GameOptions = {}) {
 		const stored = options.H === undefined || options.W === undefined ? readShape(options.storage ?? memoryStorage()) : null;
@@ -351,21 +360,35 @@ export class GameController {
 
 	// ── AI ────────────────────────────────────────────────────────────────────
 
-	/** Attach an AI and load its model. A failure leaves a playable human game. */
-	async boot(provider: AiProvider, modelUrl: string): Promise<void> {
+	/**
+	 * Attach an AI and load its model. A failure leaves a playable human game.
+	 *
+	 * Pass a factory (`() => createWorkerAi(new Worker(...))`) so Retry can build
+	 * a fresh provider: a Worker that failed to fetch or decode is not revived by
+	 * calling `init` on it again.
+	 */
+	async boot(provider: AiProvider | AiProviderFactory, modelUrl: string): Promise<void> {
 		if (this.ai !== null) return;
-		this.ai = provider;
+		this.aiFactory = typeof provider === "function" ? provider : null;
+		this.ai = typeof provider === "function" ? provider() : provider;
 		this.modelUrl = modelUrl;
 		await this.load();
 	}
 
 	/** Drop a failed AI and try again; the human game keeps working either way. */
 	async retry(): Promise<void> {
-		this.ai = null;
+		if (this.modelUrl === null) return;
+		if (this.aiFactory !== null) {
+			const stale = this.ai;
+			this.ai = null;
+			stale?.dispose?.();
+			this.ai = this.aiFactory();
+		}
 		this.aiReady = false;
-		this.aiError = null;
 		this.progress = 0;
+		this.aiError = null;
 		this.emit();
+		await this.load();
 	}
 
 	/** Re-run the model load on an already-attached provider. */
@@ -406,6 +429,11 @@ export class GameController {
 				return false;
 			}
 			return this.applyDir(dir);
+		} catch (error) {
+			// A dead Worker or a timed-out search must never wedge the board: keep the
+			// human game playable, stop auto-play and show the message Retry acts on.
+			this.aiError = error instanceof Error ? error.message : String(error);
+			return false;
 		} finally {
 			this.thinking = false;
 			this.emit();
@@ -419,11 +447,15 @@ export class GameController {
 		}
 		if (!this.aiReady || this.status !== "playing") return;
 		this.auto = true;
+		const token = ++this.autoToken;
 		this.emit();
-		void this.autoLoop();
+		void this.autoLoop(token);
 	}
 
 	private stopAuto(): void {
+		// Invalidate the running loop first, so a move it already started cannot
+		// re-arm the timer or clobber the next loop's resolve/cancel handles.
+		this.autoToken += 1;
 		this.autoCancel?.();
 		this.autoCancel = null;
 		// Wake the loop: cancelling the timer alone would leave its await pending forever.
@@ -434,20 +466,24 @@ export class GameController {
 		this.emit();
 	}
 
-	private async autoLoop(): Promise<void> {
-		while (this.auto && this.status === "playing") {
-			const moved = await this.aiStep();
-			if (!moved) break;
-			await new Promise<void>((resolve) => {
-				this.autoResolve = resolve;
-				this.autoCancel = this.scheduler.after(this.speedMs, () => {
-					this.autoCancel = null;
-					this.autoResolve = null;
-					resolve();
+	private async autoLoop(token: number): Promise<void> {
+		try {
+			while (this.auto && this.autoToken === token && this.status === "playing") {
+				const moved = await this.aiStep();
+				// Pause/restart may have happened during the search: this loop no longer owns auto.
+				if (!moved || this.autoToken !== token) break;
+				await new Promise<void>((resolve) => {
+					this.autoResolve = resolve;
+					this.autoCancel = this.scheduler.after(this.speedMs, () => {
+						this.autoCancel = null;
+						this.autoResolve = null;
+						resolve();
+					});
 				});
-			});
+			}
+		} finally {
+			if (this.autoToken === token) this.stopAuto();
 		}
-		this.stopAuto();
 	}
 
 	async hint(): Promise<void> {
@@ -462,6 +498,8 @@ export class GameController {
 				depthCfgFor(this.level)
 			);
 			this.hintDir = dir;
+		} catch (error) {
+			this.aiError = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.thinking = false;
 			this.emit();
@@ -471,6 +509,9 @@ export class GameController {
 	dispose(): void {
 		this.stopAuto();
 		this.cancelPending();
+		const ai = this.ai;
+		this.ai = null;
+		ai?.dispose?.();
 		this.listeners.clear();
 	}
 }
