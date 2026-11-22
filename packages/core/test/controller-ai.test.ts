@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GameController, type AiProvider, type AiMove, type Scheduler } from "../src/game/controller";
+import { Engine } from "../src/engine";
 
 /** A provider whose behaviour each test controls; records what the controller asked for. */
 function fakeProvider(behaviour: {
@@ -90,6 +91,12 @@ describe("controller AI failure paths", () => {
 		const sched = manualScheduler();
 		/** Only the auto-play delay (speedMs), not the slide animation (slideMs). */
 		const autoTimers = () => sched.timers.filter((timer) => timer.ms === 140);
+		/** A direction that really changes the current board, so `applyDir` cannot no-op. */
+		const legal = () => {
+			const snapshot = controller.getSnapshot();
+			const engine = new Engine(snapshot.H, snapshot.W);
+			return (["LEFT", "UP", "RIGHT", "DOWN"] as const).find((dir) => engine.planMove(snapshot.board, dir).changed) ?? "LEFT";
+		};
 		const controller = new GameController({ H: 4, W: 4, scheduler: sched.scheduler });
 		await controller.boot(ai.provider, "model.pack");
 
@@ -106,12 +113,12 @@ describe("controller AI failure paths", () => {
 
 		// The move loop A was waiting for arrives late. It must not re-arm a timer.
 		expect(pending).toHaveLength(2);
-		pending[0]?.({ dir: "LEFT", value: 1 });
+		pending[0]?.({ dir: legal(), value: 1 });
 		await tick();
 		expect(autoTimers()).toHaveLength(0);
 		expect(controller.getSnapshot().auto).toBe(true); // loop B still owns auto
 
-		pending[1]?.({ dir: "LEFT", value: 1 });
+		pending[1]?.({ dir: legal(), value: 1 });
 		await tick();
 		expect(autoTimers()).toHaveLength(1); // only loop B scheduled the next move
 	});
