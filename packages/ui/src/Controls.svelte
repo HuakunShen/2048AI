@@ -49,10 +49,10 @@
 		</p>
 	{/if}
 
-	<div class="grid-2">
+	<div class="grid-4">
 		<button class="btn" type="button" onclick={onNew}>New</button>
 		<button class="btn primary" type="button" onclick={onToggleAuto} disabled={!playable}>
-			{snapshot.auto ? "Pause" : "Auto-play"}
+			{snapshot.auto ? "Pause" : "Auto"}
 		</button>
 		<button
 			class="btn outline"
@@ -69,7 +69,10 @@
 	</div>
 
 	<div class="field">
-		<span class="muted small">AI strength</span>
+		<div class="row muted small">
+			<span>AI strength</span>
+			<span class="tiny">{STRENGTHS.find((s) => s.level === snapshot.level)?.hint}</span>
+		</div>
 		<div class="grid-3">
 			{#each STRENGTHS as s (s.level)}
 				<button
@@ -82,7 +85,6 @@
 				>
 			{/each}
 		</div>
-		<span class="muted tiny">{STRENGTHS.find((s) => s.level === snapshot.level)?.hint}</span>
 	</div>
 
 	<div class="field">
@@ -106,7 +108,7 @@
 	.controls {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.5rem;
 		width: 100%;
 		font-size: var(--font-size-base, 1rem);
 	}
@@ -132,7 +134,7 @@
 	.field {
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: 0.25rem;
 	}
 	.progress {
 		height: 0.5rem;
@@ -145,25 +147,26 @@
 		background: var(--primary, CanvasText);
 		transition: width 120ms linear;
 	}
-	.grid-2 {
+	.grid-4 {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.375rem;
 	}
 	.grid-3 {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 0.5rem;
+		gap: 0.375rem;
 	}
 	.btn {
-		height: 2.5rem;
-		padding: 0 0.75rem;
+		height: 2rem;
+		padding: 0 0.5rem;
 		border-radius: var(--radius, 6px);
 		border: 1px solid var(--border, GrayText);
 		background: var(--secondary, transparent);
 		color: var(--secondary-foreground, CanvasText);
 		font: inherit;
 		font-weight: 500;
+		font-size: 0.8125rem;
 		cursor: pointer;
 		transition: opacity 120ms ease;
 	}

@@ -330,7 +330,7 @@
 		color: var(--muted-foreground, GrayText);
 	}
 	.stat-value {
-		font-size: 1rem;
+		font-size: 0.9375rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
 	}
@@ -342,10 +342,10 @@
 	.shapes {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.375rem;
+		gap: 0.25rem;
 	}
 	.chip {
-		height: 1.75rem;
+		height: 1.5rem;
 		padding: 0 0.5rem;
 		border-radius: var(--radius, 6px);
 		border: 1px solid var(--border, GrayText);
@@ -376,6 +376,7 @@
 		touch-action: none;
 	}
 	.status {
+		font-size: 0.75rem;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
